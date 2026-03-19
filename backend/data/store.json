@@ -1,0 +1,558 @@
+{
+  "meta": {
+    "version": 3,
+    "updatedAt": "2026-03-19T05:43:57.267Z"
+  },
+  "appSettings": {
+    "appName": "Avtobys MVP",
+    "supportPhone": "+7 700-255-56-19",
+    "supportTelegram": "@avtobys_support_bot",
+    "loginDeliveryMode": "telegram",
+    "defaultLanguage": "Русский",
+    "availableLanguages": [
+      "Русский",
+      "Қазақша"
+    ],
+    "shareUrl": "https://avtobys.local/app",
+    "currencySymbol": "₸",
+    "newUserBonusBalance": 3000,
+    "minimumTopUpAmount": 500,
+    "maintenanceMode": false
+  },
+  "cities": [
+    {
+      "id": "aktau",
+      "name": "Актау"
+    },
+    {
+      "id": "astana",
+      "name": "Астана"
+    },
+    {
+      "id": "almaty",
+      "name": "Алматы"
+    }
+  ],
+  "tariffs": [
+    {
+      "id": "aktau-standard",
+      "cityId": "aktau",
+      "name": "Стандарт",
+      "price": 70
+    },
+    {
+      "id": "aktau-student",
+      "cityId": "aktau",
+      "name": "Студент",
+      "price": 50
+    },
+    {
+      "id": "astana-standard",
+      "cityId": "astana",
+      "name": "Стандарт",
+      "price": 80
+    },
+    {
+      "id": "almaty-standard",
+      "cityId": "almaty",
+      "name": "Стандарт",
+      "price": 90
+    }
+  ],
+  "buses": [
+    {
+      "id": "bus-1",
+      "cityId": "aktau",
+      "number": "861AQ12",
+      "routeNumber": "№ 11",
+      "tariffId": "aktau-standard",
+      "bluetoothEnabled": true,
+      "qrToken": "bus-1-qr",
+      "validatorName": "861AQ12"
+    },
+    {
+      "id": "bus-2",
+      "cityId": "astana",
+      "number": "852CS02",
+      "routeNumber": "№ 12",
+      "tariffId": "astana-standard",
+      "bluetoothEnabled": true,
+      "qrToken": "bus-2-qr",
+      "validatorName": "852CS02"
+    },
+    {
+      "id": "bus-3",
+      "cityId": "almaty",
+      "number": "870KM05",
+      "routeNumber": "№ 32",
+      "tariffId": "almaty-standard",
+      "bluetoothEnabled": false,
+      "qrToken": "bus-3-qr",
+      "validatorName": "870KM05"
+    },
+    {
+      "id": "bus-1773856530419",
+      "cityId": "aktau",
+      "number": "862AQ",
+      "routeNumber": "12",
+      "tariffId": "aktau-standard",
+      "bluetoothEnabled": true,
+      "qrToken": "qr-1773856530419",
+      "validatorName": "862AQ"
+    },
+    {
+      "id": "bus-1773896421574-3577cc",
+      "cityId": "aktau",
+      "number": "777AA12",
+      "routeNumber": "1",
+      "tariffId": "aktau-standard",
+      "bluetoothEnabled": true,
+      "validatorName": "777AA12",
+      "qrToken": "qr-1773896421575"
+    },
+    {
+      "id": "bus-1773899035492-646172",
+      "cityId": "aktau",
+      "number": "667AA12",
+      "routeNumber": "1",
+      "tariffId": "aktau-standard",
+      "bluetoothEnabled": true,
+      "validatorName": "667AA12",
+      "qrToken": "qr-1773899035492"
+    }
+  ],
+  "tickets": [
+    {
+      "id": "ticket-1773856417290",
+      "phoneNumber": "+7 777-777-77-77",
+      "cityId": "aktau",
+      "cityName": "Актау",
+      "busId": "bus-1",
+      "busNumber": "861AQ12",
+      "routeNumber": "№ 11",
+      "tariffName": "Стандарт",
+      "amount": 70,
+      "paymentMethod": "wallet",
+      "qrValue": "bus-1-qr:1773856417291",
+      "paidAt": "2026-03-18T17:53:37.291Z",
+      "validUntil": "2026-03-18T18:38:37.291Z"
+    },
+    {
+      "id": "ticket-1773856537125",
+      "phoneNumber": "+7 777-777-77-77",
+      "cityId": "aktau",
+      "cityName": "Актау",
+      "busId": "bus-1773856530419",
+      "busNumber": "862AQ",
+      "routeNumber": "12",
+      "tariffName": "Стандарт",
+      "amount": 70,
+      "paymentMethod": "wallet",
+      "qrValue": "qr-1773856530419:1773856537126",
+      "paidAt": "2026-03-18T17:55:37.126Z",
+      "validUntil": "2026-03-18T18:40:37.126Z"
+    },
+    {
+      "id": "ticket-1773856711101",
+      "phoneNumber": "+7 777-777-77-77",
+      "cityId": "aktau",
+      "cityName": "Актау",
+      "busId": "bus-1773856530419",
+      "busNumber": "862AQ",
+      "routeNumber": "12",
+      "tariffName": "Стандарт",
+      "amount": 70,
+      "paymentMethod": "wallet",
+      "qrValue": "qr-1773856530419:1773856711101",
+      "paidAt": "2026-03-18T17:58:31.101Z",
+      "validUntil": "2026-03-18T18:43:31.101Z"
+    },
+    {
+      "id": "ticket-1773856844230",
+      "phoneNumber": "+7 775-867-37-37",
+      "cityId": "aktau",
+      "cityName": "Актау",
+      "busId": "bus-1773856530419",
+      "busNumber": "862AQ",
+      "routeNumber": "12",
+      "tariffName": "Стандарт",
+      "amount": 70,
+      "paymentMethod": "wallet",
+      "qrValue": "qr-1773856530419:1773856844230",
+      "paidAt": "2026-03-18T18:00:44.230Z",
+      "validUntil": "2026-03-18T18:45:44.230Z"
+    },
+    {
+      "id": "ticket-1773894736312-81cab4",
+      "userId": "user-1773894736168-35f573",
+      "phoneNumber": "+77771112233",
+      "cityId": "aktau",
+      "cityName": "Актау",
+      "busId": "bus-1",
+      "busNumber": "861AQ12",
+      "routeNumber": "№ 11",
+      "tariffName": "Стандарт",
+      "amount": 70,
+      "paymentMethod": "wallet",
+      "qrValue": "bus-1-qr:1773894736312",
+      "paidAt": "2026-03-19T04:32:16.312Z",
+      "validUntil": "2026-03-19T05:17:16.312Z",
+      "status": "active"
+    },
+    {
+      "id": "ticket-1773896428134-cc02dd",
+      "userId": "user-1773896428133-3c3170",
+      "phoneNumber": "+77777777777",
+      "cityId": "aktau",
+      "cityName": "Актау",
+      "busId": "bus-1773896421574-3577cc",
+      "busNumber": "777AA12",
+      "routeNumber": "1",
+      "tariffName": "Стандарт",
+      "amount": 70,
+      "paymentMethod": "wallet",
+      "qrValue": "qr-1773896421575:1773896428134",
+      "paidAt": "2026-03-19T05:00:28.134Z",
+      "validUntil": "2026-03-19T05:45:28.135Z",
+      "status": "active"
+    },
+    {
+      "id": "ticket-1773898427854-e020c4",
+      "userId": "user-1773896428133-3c3170",
+      "phoneNumber": "+77777777777",
+      "cityId": "aktau",
+      "cityName": "Актау",
+      "busId": "bus-1773896421574-3577cc",
+      "busNumber": "777AA12",
+      "routeNumber": "1",
+      "tariffName": "Стандарт",
+      "amount": 70,
+      "paymentMethod": "wallet",
+      "qrValue": "qr-1773896421575:1773898427854",
+      "paidAt": "2026-03-19T05:33:47.854Z",
+      "validUntil": "2026-03-19T06:18:47.854Z",
+      "status": "active"
+    },
+    {
+      "id": "ticket-1773899014179-1407e3",
+      "userId": "user-1773896428133-3c3170",
+      "phoneNumber": "+77777777777",
+      "cityId": "aktau",
+      "cityName": "Актау",
+      "busId": "bus-1",
+      "busNumber": "861AQ12",
+      "routeNumber": "№ 11",
+      "tariffName": "Стандарт",
+      "amount": 70,
+      "paymentMethod": "wallet",
+      "qrValue": "bus-1-qr:1773899014179",
+      "paidAt": "2026-03-19T05:43:34.179Z",
+      "validUntil": "2026-03-19T06:28:34.179Z",
+      "status": "active"
+    },
+    {
+      "id": "ticket-1773899037266-bcd578",
+      "userId": "user-1773896428133-3c3170",
+      "phoneNumber": "+77777777777",
+      "cityId": "aktau",
+      "cityName": "Актау",
+      "busId": "bus-1773899035492-646172",
+      "busNumber": "667AA12",
+      "routeNumber": "1",
+      "tariffName": "Стандарт",
+      "amount": 70,
+      "paymentMethod": "wallet",
+      "qrValue": "qr-1773899035492:1773899037266",
+      "paidAt": "2026-03-19T05:43:57.266Z",
+      "validUntil": "2026-03-19T06:28:57.266Z",
+      "status": "active"
+    }
+  ],
+  "users": [
+    {
+      "id": "user-1773894736168-35f573",
+      "phoneNumber": "+77771112233",
+      "fullName": "Новый пользователь",
+      "cityName": "?????",
+      "telegramChatId": "",
+      "status": "active",
+      "createdAt": "2026-03-19T04:32:16.168Z",
+      "updatedAt": "2026-03-19T04:32:16.312Z",
+      "settings": {
+        "language": "Русский",
+        "notificationsEnabled": true,
+        "appTheme": "light"
+      },
+      "wallet": {
+        "balance": 3930,
+        "cards": [],
+        "activeCardId": null
+      }
+    },
+    {
+      "id": "user-1773895654741-f18983",
+      "phoneNumber": "+77773334455",
+      "fullName": "Новый пользователь",
+      "cityName": "?????",
+      "telegramChatId": "",
+      "status": "active",
+      "createdAt": "2026-03-19T04:47:34.741Z",
+      "updatedAt": "2026-03-19T04:47:34.900Z",
+      "settings": {
+        "language": "Русский",
+        "notificationsEnabled": true,
+        "appTheme": "light"
+      },
+      "wallet": {
+        "balance": 3000,
+        "cards": [],
+        "activeCardId": null
+      }
+    },
+    {
+      "id": "user-1773896428133-3c3170",
+      "phoneNumber": "+77777777777",
+      "fullName": "Новый пользователь",
+      "cityName": "",
+      "telegramChatId": "",
+      "status": "active",
+      "createdAt": "2026-03-19T05:00:28.133Z",
+      "updatedAt": "2026-03-19T05:43:57.266Z",
+      "settings": {
+        "language": "Русский",
+        "notificationsEnabled": true,
+        "appTheme": "light"
+      },
+      "wallet": {
+        "balance": 2720,
+        "cards": [],
+        "activeCardId": null
+      }
+    }
+  ],
+  "sessions": [
+    {
+      "id": "session-1773894736222-a21a28",
+      "token": "5fddd7c9b415c60e18a9291e78a05c2a98cfa35979d3917b",
+      "userId": "user-1773894736168-35f573",
+      "createdAt": "2026-03-19T04:32:16.222Z",
+      "lastSeenAt": "2026-03-19T04:32:16.311Z",
+      "expiresAt": "2026-04-18T04:32:16.222Z"
+    },
+    {
+      "id": "session-1773895654900-43b859",
+      "token": "36ef8530de01efe0a2cb4a7e329b0611e2941261247d488f",
+      "userId": "user-1773895654741-f18983",
+      "createdAt": "2026-03-19T04:47:34.900Z",
+      "lastSeenAt": "2026-03-19T04:47:34.923Z",
+      "expiresAt": "2026-04-18T04:47:34.900Z"
+    }
+  ],
+  "authCodes": [
+    {
+      "id": "auth-1773895654742-d23fed",
+      "phoneNumber": "+77773334455",
+      "code": "2484",
+      "status": "used",
+      "attempts": 0,
+      "createdAt": "2026-03-19T04:47:34.742Z",
+      "expiresAt": "2026-03-19T04:52:34.742Z",
+      "deliveryId": "delivery-1773895654741-a15da9"
+    }
+  ],
+  "walletTransactions": [
+    {
+      "id": "txn-1773894736283-7e14b7",
+      "userId": "user-1773894736168-35f573",
+      "type": "topup",
+      "source": "manual",
+      "description": "Balance top-up",
+      "amount": 1000,
+      "balanceBefore": 3000,
+      "balanceAfter": 4000,
+      "meta": {
+        "cardId": null
+      },
+      "createdAt": "2026-03-19T04:32:16.283Z"
+    },
+    {
+      "id": "txn-1773894736312-be6562",
+      "userId": "user-1773894736168-35f573",
+      "type": "ride",
+      "source": "ticket",
+      "description": "Ride payment for 861AQ12",
+      "amount": -70,
+      "balanceBefore": 4000,
+      "balanceAfter": 3930,
+      "meta": {
+        "busId": "bus-1",
+        "routeNumber": "№ 11"
+      },
+      "createdAt": "2026-03-19T04:32:16.312Z"
+    },
+    {
+      "id": "txn-1773896428134-bb8b66",
+      "userId": "user-1773896428133-3c3170",
+      "type": "ride",
+      "source": "ticket",
+      "description": "Ride payment for 777AA12",
+      "amount": -70,
+      "balanceBefore": 3000,
+      "balanceAfter": 2930,
+      "meta": {
+        "busId": "bus-1773896421574-3577cc",
+        "routeNumber": "1"
+      },
+      "createdAt": "2026-03-19T05:00:28.134Z"
+    },
+    {
+      "id": "txn-1773898427853-e87b78",
+      "userId": "user-1773896428133-3c3170",
+      "type": "ride",
+      "source": "ticket",
+      "description": "Ride payment for 777AA12",
+      "amount": -70,
+      "balanceBefore": 2930,
+      "balanceAfter": 2860,
+      "meta": {
+        "busId": "bus-1773896421574-3577cc",
+        "routeNumber": "1"
+      },
+      "createdAt": "2026-03-19T05:33:47.854Z"
+    },
+    {
+      "id": "txn-1773899014178-69e077",
+      "userId": "user-1773896428133-3c3170",
+      "type": "ride",
+      "source": "ticket",
+      "description": "Ride payment for 861AQ12",
+      "amount": -70,
+      "balanceBefore": 2860,
+      "balanceAfter": 2790,
+      "meta": {
+        "busId": "bus-1",
+        "routeNumber": "№ 11"
+      },
+      "createdAt": "2026-03-19T05:43:34.179Z"
+    },
+    {
+      "id": "txn-1773899037266-973702",
+      "userId": "user-1773896428133-3c3170",
+      "type": "ride",
+      "source": "ticket",
+      "description": "Ride payment for 667AA12",
+      "amount": -70,
+      "balanceBefore": 2790,
+      "balanceAfter": 2720,
+      "meta": {
+        "busId": "bus-1773899035492-646172",
+        "routeNumber": "1"
+      },
+      "createdAt": "2026-03-19T05:43:57.266Z"
+    }
+  ],
+  "supportMessages": [],
+  "notifications": [
+    {
+      "id": "notification-1773894736169-080c73",
+      "userId": "user-1773894736168-35f573",
+      "title": "Добро пожаловать",
+      "body": "Аккаунт создан и готов к поездкам.",
+      "type": "system",
+      "read": false,
+      "createdAt": "2026-03-19T04:32:16.169Z"
+    },
+    {
+      "id": "notification-1773894736312-74ddd0",
+      "userId": "user-1773894736168-35f573",
+      "title": "Оплата проезда",
+      "body": "№ 11 • 70 ₸",
+      "type": "ticket",
+      "read": false,
+      "createdAt": "2026-03-19T04:32:16.312Z"
+    },
+    {
+      "id": "notification-1773895654741-18c1ab",
+      "userId": "user-1773895654741-f18983",
+      "title": "Добро пожаловать",
+      "body": "Аккаунт создан и готов к поездкам.",
+      "type": "system",
+      "read": false,
+      "createdAt": "2026-03-19T04:47:34.741Z"
+    },
+    {
+      "id": "notification-1773896428133-564417",
+      "userId": "user-1773896428133-3c3170",
+      "title": "Добро пожаловать",
+      "body": "Аккаунт создан и готов к поездкам.",
+      "type": "system",
+      "read": false,
+      "createdAt": "2026-03-19T05:00:28.134Z"
+    },
+    {
+      "id": "notification-1773896428135-b32a7d",
+      "userId": "user-1773896428133-3c3170",
+      "title": "Оплата проезда",
+      "body": "1 • 70 ₸",
+      "type": "ticket",
+      "read": false,
+      "createdAt": "2026-03-19T05:00:28.135Z"
+    },
+    {
+      "id": "notification-1773898427854-39b87e",
+      "userId": "user-1773896428133-3c3170",
+      "title": "Оплата проезда",
+      "body": "1 • 70 ₸",
+      "type": "ticket",
+      "read": false,
+      "createdAt": "2026-03-19T05:33:47.854Z"
+    },
+    {
+      "id": "notification-1773899014180-9a7351",
+      "userId": "user-1773896428133-3c3170",
+      "title": "Оплата проезда",
+      "body": "№ 11 • 70 ₸",
+      "type": "ticket",
+      "read": false,
+      "createdAt": "2026-03-19T05:43:34.180Z"
+    },
+    {
+      "id": "notification-1773899037266-f64c73",
+      "userId": "user-1773896428133-3c3170",
+      "title": "Оплата проезда",
+      "body": "1 • 70 ₸",
+      "type": "ticket",
+      "read": false,
+      "createdAt": "2026-03-19T05:43:57.266Z"
+    }
+  ],
+  "telegramDeliveries": [
+    {
+      "id": "delivery-1773894736169-d47853",
+      "phoneNumber": "+77771112233",
+      "chatId": "",
+      "status": "chat-not-configured",
+      "messageText": "Avtobys login code for +77771112233: 6699",
+      "responseBody": "",
+      "error": "",
+      "createdAt": "2026-03-19T04:32:16.169Z"
+    },
+    {
+      "id": "delivery-1773895654741-a15da9",
+      "phoneNumber": "+77773334455",
+      "chatId": "",
+      "status": "chat-not-configured",
+      "messageText": "Avtobys login code for +77773334455: 2484",
+      "responseBody": "",
+      "error": "",
+      "createdAt": "2026-03-19T04:47:34.741Z"
+    }
+  ],
+  "admins": [
+    {
+      "id": "admin-dev",
+      "name": "Local Admin",
+      "token": "avtobys-admin-dev"
+    }
+  ]
+}
