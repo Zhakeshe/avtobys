@@ -1,0 +1,32 @@
+{
+  "name": "react_native_clone",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "web:build": "expo export --platform web --output-dir dist"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.1.1",
+    "@react-native-async-storage/async-storage": "^3.0.1",
+    "expo": "~55.0.7",
+    "expo-camera": "~55.0.10",
+    "expo-linear-gradient": "~55.0.9",
+    "expo-status-bar": "~55.0.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.2",
+    "react-native-ble-plx": "^3.5.1",
+    "react-native-qrcode-svg": "^6.3.21",
+    "react-native-svg": "^15.15.4",
+    "react-native-web": "^0.21.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}
