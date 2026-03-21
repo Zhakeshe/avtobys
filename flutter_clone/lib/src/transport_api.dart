@@ -208,6 +208,7 @@ class PublicConfigDto {
     required this.supportPhone,
     required this.supportTelegram,
     required this.accessRequestTelegram,
+    required this.telegramBotUsername,
     required this.loginDeliveryMode,
     required this.defaultLanguage,
     required this.shareUrl,
@@ -222,6 +223,7 @@ class PublicConfigDto {
   final String supportPhone;
   final String supportTelegram;
   final String accessRequestTelegram;
+  final String telegramBotUsername;
   final String loginDeliveryMode;
   final String defaultLanguage;
   final String shareUrl;
@@ -237,6 +239,7 @@ class PublicConfigDto {
       supportPhone: json['supportPhone'] as String? ?? '',
       supportTelegram: json['supportTelegram'] as String? ?? '',
       accessRequestTelegram: json['accessRequestTelegram'] as String? ?? '@aqxrx',
+      telegramBotUsername: json['telegramBotUsername'] as String? ?? '',
       loginDeliveryMode: json['loginDeliveryMode'] as String? ?? 'telegram',
       defaultLanguage: json['defaultLanguage'] as String? ?? 'Русский',
       shareUrl: json['shareUrl'] as String? ?? '',
@@ -251,6 +254,40 @@ class PublicConfigDto {
   }
 }
 
+class TelegramBindDto {
+  const TelegramBindDto({
+    required this.token,
+    required this.botUsername,
+    required this.deepLink,
+    required this.command,
+    required this.instructions,
+    required this.expiresAt,
+  });
+
+  final String token;
+  final String botUsername;
+  final String deepLink;
+  final String command;
+  final String instructions;
+  final DateTime expiresAt;
+
+  bool get hasBotUsername => botUsername.isNotEmpty;
+  bool get hasDeepLink => deepLink.isNotEmpty;
+
+  factory TelegramBindDto.fromJson(Map<String, dynamic> json) {
+    return TelegramBindDto(
+      token: json['token'] as String? ?? '',
+      botUsername: json['botUsername'] as String? ?? '',
+      deepLink: json['deepLink'] as String? ?? '',
+      command: json['command'] as String? ?? '',
+      instructions: json['instructions'] as String? ?? '',
+      expiresAt:
+          DateTime.tryParse(json['expiresAt'] as String? ?? '') ??
+          DateTime.now(),
+    );
+  }
+}
+
 class AuthCodeRequestDto {
   const AuthCodeRequestDto({
     required this.ok,
@@ -259,6 +296,7 @@ class AuthCodeRequestDto {
     this.debugCode,
     this.deliveryStatus,
     this.supportTelegram,
+    this.telegramBind,
   });
 
   final bool ok;
@@ -267,9 +305,11 @@ class AuthCodeRequestDto {
   final String? debugCode;
   final String? deliveryStatus;
   final String? supportTelegram;
+  final TelegramBindDto? telegramBind;
 
   factory AuthCodeRequestDto.fromJson(Map<String, dynamic> json) {
     final delivery = json['delivery'] as Map<String, dynamic>?;
+    final telegramBind = json['telegramBind'] as Map<String, dynamic>?;
     return AuthCodeRequestDto(
       ok: json['ok'] as bool? ?? false,
       phoneNumber: json['phoneNumber'] as String? ?? '',
@@ -278,6 +318,9 @@ class AuthCodeRequestDto {
       debugCode: json['debugCode'] as String?,
       deliveryStatus: delivery?['status'] as String?,
       supportTelegram: json['supportTelegram'] as String?,
+      telegramBind: telegramBind == null
+          ? null
+          : TelegramBindDto.fromJson(telegramBind),
     );
   }
 }
@@ -439,6 +482,26 @@ class TransportApi {
       body: body,
     );
     return UserDto.fromJson(response);
+  }
+
+  static Future<TelegramBindDto> createTelegramBindToken({
+    String? phoneNumber,
+    String? cityName,
+  }) async {
+    final body = <String, dynamic>{};
+    if (phoneNumber != null && phoneNumber.isNotEmpty) {
+      body['phoneNumber'] = phoneNumber;
+    }
+    if (cityName != null && cityName.isNotEmpty) {
+      body['cityName'] = cityName;
+    }
+    final response = await _requestObject(
+      '/telegram/bind-token',
+      method: 'POST',
+      body: body,
+      omitAuth: phoneNumber != null && phoneNumber.isNotEmpty,
+    );
+    return TelegramBindDto.fromJson(response);
   }
 
   static Future<RideAccessRequestDto> requestRideAccess({

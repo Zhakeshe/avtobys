@@ -34,6 +34,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     supportPhone: '',
     supportTelegram: '@aqxrx',
     accessRequestTelegram: '@aqxrx',
+    telegramBotUsername: '',
     loginDeliveryMode: 'telegram',
     defaultLanguage: 'Русский',
     shareUrl: '',
@@ -324,6 +325,10 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     return response.message;
   }
 
+  Future<TelegramBindDto> _requestTelegramBind() {
+    return TransportApi.createTelegramBindToken(cityName: _currentCity);
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -492,11 +497,14 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
           rideAccessEnabled: _user?.rideAccessEnabled ?? false,
           trialRidesRemaining: _user?.trialRidesRemaining ?? _config.trialRideCount,
           accessTelegram: _config.accessRequestTelegram,
+          telegramChatId: _user?.telegramChatId ?? '',
+          telegramBotUsername: _config.telegramBotUsername,
           onBack: _closeOverlay,
           onLogout: _logout,
           onOpenCards: () => _openOverlay(AppOverlay.cards),
           onOpenCity: () => _openOverlay(AppOverlay.cityPicker),
           onRequestAccess: _requestRideAccess,
+          onRequestTelegramBind: _requestTelegramBind,
         );
       case AppOverlay.cards:
         return CardsOverlay(

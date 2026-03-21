@@ -27,6 +27,7 @@ typedef AuthCodeVerifyCallback = Future<void> Function(
   String code,
 );
 typedef RequestRideAccessCallback = Future<String> Function();
+typedef RequestTelegramBindCallback = Future<TelegramBindDto> Function();
 
 class RoutesTabScreen extends StatefulWidget {
   const RoutesTabScreen({
@@ -280,6 +281,7 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
   bool _awaitingCode = false;
   String _error = '';
   String? _debugCode;
+  TelegramBindDto? _telegramBind;
 
   String get _digits => _phoneController.text.replaceAll(RegExp(r'\D'), '');
   bool get _canRequestCode => _digits.length >= 10;
@@ -322,16 +324,22 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
       _requesting = true;
       _error = '';
       _debugCode = null;
+      _telegramBind = null;
     });
     try {
       final response = await widget.onRequestCode(_phoneNumber);
+      final canEnterCode =
+          (response.debugCode?.isNotEmpty ?? false) ||
+          response.deliveryStatus == 'sent';
       if (!mounted) {
         return;
       }
       setState(() {
-        _awaitingCode = true;
+        _awaitingCode = canEnterCode;
         _requesting = false;
         _debugCode = response.debugCode;
+        _telegramBind = response.telegramBind;
+        _codeController.clear();
       });
     } catch (error) {
       if (!mounted) {
@@ -363,6 +371,16 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
         _error = error.toString();
       });
     }
+  }
+
+  Future<void> _copyTelegramValue(String value) async {
+    await Clipboard.setData(ClipboardData(text: value));
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Скопировано в буфер обмена')),
+    );
   }
 
   @override
@@ -442,7 +460,9 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
                           Text(
                             _awaitingCode
                                 ? 'Код отправлен в Telegram. Для входа введите его ниже.'
-                                : 'Код подтверждения придет в Telegram.',
+                                : (_telegramBind != null
+                                      ? 'Telegram-бот не может написать первым. Отправьте команду ниже, потом запросите код еще раз.'
+                                      : 'Код подтверждения придет в Telegram.'),
                             style: const TextStyle(
                               fontSize: 16,
                               color: AppColors.textSecondary,
@@ -459,6 +479,7 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
                                   _awaitingCode = false;
                                   _error = '';
                                   _codeController.clear();
+                                  _telegramBind = null;
                                 });
                               },
                             )
@@ -473,6 +494,13 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
                               message: 'Debug-код: $_debugCode',
                               background: const Color(0xFFFFF3D8),
                               color: const Color(0xFF6B4D00),
+                            ),
+                          ],
+                          if (_telegramBind != null) ...[
+                            const SizedBox(height: 14),
+                            _TelegramBindInfoCard(
+                              bind: _telegramBind!,
+                              onCopy: _copyTelegramValue,
                             ),
                           ],
                           if (_error.isNotEmpty) ...[
@@ -497,7 +525,11 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
                     ),
                     const SizedBox(height: 24),
                     _PrimaryButton(
-                      label: _awaitingCode ? 'Войти' : 'Далее',
+                      label: _awaitingCode
+                          ? 'Войти'
+                          : (_telegramBind != null
+                                ? 'Запросить код снова'
+                                : 'Далее'),
                       enabled: _awaitingCode ? _canVerifyCode : _canRequestCode,
                       busy: _awaitingCode ? _verifying : _requesting,
                       onTap: _awaitingCode ? _verifyCode : _requestCode,
@@ -716,11 +748,14 @@ class SettingsOverlay extends StatefulWidget {
     required this.rideAccessEnabled,
     required this.trialRidesRemaining,
     required this.accessTelegram,
+    required this.telegramChatId,
+    required this.telegramBotUsername,
     required this.onBack,
     required this.onLogout,
     required this.onOpenCards,
     required this.onOpenCity,
     required this.onRequestAccess,
+    required this.onRequestTelegramBind,
   });
 
   final String phoneNumber;
@@ -729,11 +764,14 @@ class SettingsOverlay extends StatefulWidget {
   final bool rideAccessEnabled;
   final int trialRidesRemaining;
   final String accessTelegram;
+  final String telegramChatId;
+  final String telegramBotUsername;
   final VoidCallback onBack;
   final VoidCallback onLogout;
   final VoidCallback onOpenCards;
   final VoidCallback onOpenCity;
   final RequestRideAccessCallback onRequestAccess;
+  final RequestTelegramBindCallback onRequestTelegramBind;
 
   @override
   State<SettingsOverlay> createState() => _SettingsOverlayState();
@@ -741,7 +779,9 @@ class SettingsOverlay extends StatefulWidget {
 
 class _SettingsOverlayState extends State<SettingsOverlay> {
   bool _requesting = false;
+  bool _bindingTelegram = false;
   String _message = '';
+  TelegramBindDto? _telegramBind;
 
   Future<void> _requestAccess() async {
     if (_requesting) {
@@ -769,6 +809,45 @@ class _SettingsOverlayState extends State<SettingsOverlay> {
         _message = error.toString();
       });
     }
+  }
+
+  Future<void> _requestTelegramBind() async {
+    if (_bindingTelegram) {
+      return;
+    }
+    setState(() {
+      _bindingTelegram = true;
+      _message = '';
+    });
+    try {
+      final bind = await widget.onRequestTelegramBind();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _bindingTelegram = false;
+        _telegramBind = bind;
+        _message = 'Откройте Telegram и отправьте команду из карточки ниже.';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _bindingTelegram = false;
+        _message = error.toString();
+      });
+    }
+  }
+
+  Future<void> _copyTelegramValue(String value) async {
+    await Clipboard.setData(ClipboardData(text: value));
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Скопировано в буфер обмена')),
+    );
   }
 
   @override
@@ -854,6 +933,17 @@ class _SettingsOverlayState extends State<SettingsOverlay> {
                 color: const Color(0xFFE7EDFF),
                 onTap: widget.onOpenCards,
               ),
+              _OverlayListRow(
+                title: _bindingTelegram
+                    ? 'Готовим Telegram-ссылку...'
+                    : (widget.telegramChatId.isNotEmpty
+                          ? 'Перепривязать Telegram'
+                          : 'Привязать Telegram'),
+                icon: Icons.send_rounded,
+                color: const Color(0xFFEAF3FF),
+                iconColor: AppColors.primaryBlueDark,
+                onTap: _bindingTelegram ? null : _requestTelegramBind,
+              ),
               if (!widget.rideAccessEnabled)
                 _OverlayListRow(
                   title: _requesting
@@ -864,6 +954,24 @@ class _SettingsOverlayState extends State<SettingsOverlay> {
                   iconColor: const Color(0xFF6B4D00),
                   onTap: _requesting ? null : _requestAccess,
                 ),
+              const SizedBox(height: 10),
+              _InfoCard(
+                message: widget.telegramChatId.isNotEmpty
+                    ? 'Telegram подключен. Коды входа придут в этот чат.'
+                    : (widget.telegramBotUsername.isNotEmpty
+                          ? 'Сначала откройте ${widget.telegramBotUsername} и свяжите чат.'
+                          : 'Сначала свяжите Telegram-чат, чтобы бот мог присылать коды.'),
+                background: Colors.white,
+                color: AppColors.textSecondary,
+                bordered: true,
+              ),
+              if (_telegramBind != null) ...[
+                const SizedBox(height: 12),
+                _TelegramBindInfoCard(
+                  bind: _telegramBind!,
+                  onCopy: _copyTelegramValue,
+                ),
+              ],
               const SizedBox(height: 10),
               _InfoCard(
                 message: 'Для активации поездок пишите ${widget.accessTelegram}.',
@@ -1406,6 +1514,82 @@ class _ShareBubble extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       child: const Icon(Icons.ios_share_rounded, color: AppColors.banner),
+    );
+  }
+}
+
+class _TelegramBindInfoCard extends StatelessWidget {
+  const _TelegramBindInfoCard({
+    required this.bind,
+    required this.onCopy,
+  });
+
+  final TelegramBindDto bind;
+  final Future<void> Function(String value) onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final values = <String>[
+      if (bind.botUsername.isNotEmpty) 'Бот: ${bind.botUsername}',
+      'Команда: ${bind.command}',
+      if (bind.deepLink.isNotEmpty) 'Ссылка: ${bind.deepLink}',
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE9F1FF),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFD6E4FF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            bind.instructions,
+            style: const TextStyle(
+              fontSize: 14,
+              height: 1.35,
+              color: AppColors.primaryBlueDark,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...values.map(
+            (value) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: SelectableText(
+                value,
+                style: const TextStyle(
+                  fontSize: 13,
+                  height: 1.35,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: () {
+                  onCopy(bind.command);
+                },
+                child: const Text('Копировать команду'),
+              ),
+              if (bind.deepLink.isNotEmpty)
+                OutlinedButton(
+                  onPressed: () {
+                    onCopy(bind.deepLink);
+                  },
+                  child: const Text('Копировать ссылку'),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
