@@ -18,15 +18,16 @@ import {
   getCities,
   getTariffs,
   getTickets,
+  type ApiRequestError,
   type BusDto,
   type TariffDto,
   type TicketDto,
 } from "./api";
 import { colors, shadow } from "./theme";
-import { formatBalance } from "./wallet-store";
+import { formatBalance, type WalletCardData } from "./wallet-store";
 
 type SearchStage = "input" | "details" | "add";
-type PaymentMethod = "wallet" | "bank-card" | "kaspi";
+type PaymentMethod = "wallet" | "transport-card" | "bank-card" | "kaspi";
 
 export function TicketsScreen({
   phoneNumber,
@@ -77,6 +78,7 @@ export function BusSearchScreen({
   phoneNumber,
   cityName,
   walletBalance,
+  activeTransportCard,
   onBack,
   onPaid,
 }: {
@@ -84,6 +86,7 @@ export function BusSearchScreen({
   phoneNumber: string;
   cityName: string;
   walletBalance: number;
+  activeTransportCard: WalletCardData | null;
   onBack: () => void;
   onPaid: (amount: number) => void;
 }) {
@@ -141,8 +144,8 @@ export function BusSearchScreen({
         setSelectedBus(null);
         setStage("add");
       }
-    } catch {
-      setError("Не удалось найти автобус в базе");
+    } catch (nextError) {
+      setError(formatApiError(nextError, "Не удалось найти автобус в базе"));
     } finally {
       setSearching(false);
     }
@@ -162,8 +165,9 @@ export function BusSearchScreen({
       });
       setSelectedBus(bus);
       setStage("details");
-    } catch {
-      setError("Не удалось добавить новый автобус");
+      setError("");
+    } catch (nextError) {
+      setError(formatApiError(nextError, "Не удалось добавить новый автобус"));
     }
   };
 
@@ -177,6 +181,17 @@ export function BusSearchScreen({
       return;
     }
 
+    if (paymentMethod === "transport-card") {
+      if (!activeTransportCard) {
+        setError("Сначала выберите активную транспортную карту");
+        return;
+      }
+      if ((activeTransportCard.balance || 0) < selectedBus.price) {
+        setError("Недостаточно баланса на транспортной карте");
+        return;
+      }
+    }
+
     try {
       const created = await createTicket({
         phoneNumber,
@@ -185,14 +200,17 @@ export function BusSearchScreen({
         cityId,
         cityName,
       });
-      if (paymentMethod === "wallet") {
-        onPaid(selectedBus.price);
-      }
+      onPaid(selectedBus.price);
       setTicket(created);
-    } catch {
-      setError("Не удалось провести оплату");
+      setError("");
+    } catch (nextError) {
+      setError(formatApiError(nextError, "Не удалось провести оплату"));
     }
   };
+
+  const transportSubtitle = activeTransportCard
+    ? `${activeTransportCard.holderName} • ${formatBalance(activeTransportCard.balance || 0)} ₸`
+    : "Сначала выберите активную транспортную карту";
 
   return (
     <View style={styles.screen}>
@@ -281,6 +299,15 @@ export function BusSearchScreen({
               onPress={() => void handlePay("wallet")}
             />
             <PaymentOptionRow
+              icon="directions-bus"
+              iconColor="#1FA868"
+              iconBackground="#E8FFF2"
+              title="Транспорт картасымен"
+              subtitle={transportSubtitle}
+              onPress={() => void handlePay("transport-card")}
+              disabled={!activeTransportCard}
+            />
+            <PaymentOptionRow
               icon="payments"
               iconColor="#EA3F34"
               iconBackground="#FFF0EE"
@@ -345,6 +372,7 @@ function PaymentOptionRow({
   title,
   subtitle,
   onPress,
+  disabled = false,
 }: {
   icon: string;
   iconColor: string;
@@ -352,9 +380,13 @@ function PaymentOptionRow({
   title: string;
   subtitle: string;
   onPress: () => void;
+  disabled?: boolean;
 }) {
   return (
-    <Pressable style={styles.paymentOption} onPress={onPress}>
+    <Pressable
+      style={[styles.paymentOption, disabled && styles.paymentOptionDisabled]}
+      onPress={disabled ? undefined : onPress}
+    >
       <View style={[styles.paymentOptionIcon, { backgroundColor: iconBackground }]}>
         <MaterialIcons name={icon as never} size={24} color={iconColor} />
       </View>
@@ -399,12 +431,12 @@ function TicketModal({
             <Pressable style={styles.modalClose} onPress={onClose}>
               <MaterialIcons name="close" size={20} color={colors.textSecondary} />
             </Pressable>
-            <Text style={styles.transportTitle}>Нөмір транспорта</Text>
+            <Text style={styles.transportTitle}>Номер транспорта</Text>
             <Text style={styles.transportNumber}>{ticket.busNumber}</Text>
             <View style={styles.qrWrap}>
               <QRCode value={ticket.qrValue} size={180} />
             </View>
-            <Text style={styles.modalMainTitle}>Менің билетім</Text>
+            <Text style={styles.modalMainTitle}>Мой билет</Text>
             <View style={styles.ticketGrid}>
               <TicketStat label="Қала" value={ticket.cityName} />
               <TicketStat label="Төлем күні" value="Бүгін" />
@@ -470,6 +502,14 @@ function normalizeTransportValue(value: string) {
   return value.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
 }
 
+function formatApiError(error: unknown, fallback: string) {
+  const apiError = error as ApiRequestError | undefined;
+  if (apiError?.code === "ACCESS_REQUIRED") {
+    return `Доступ к оплате закрыт. Напишите ${apiError.supportTelegram || "@aqxrx"} для активации.`;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   screen: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 24, paddingBottom: 24 },
@@ -501,6 +541,7 @@ const styles = StyleSheet.create({
   paymentGroup: { marginTop: 24 },
   paymentGroupTitle: { marginBottom: 12, fontSize: 16, fontWeight: "600", color: colors.textPrimary },
   paymentOption: { flexDirection: "row", alignItems: "center", borderRadius: 18, backgroundColor: "#FFFFFF", padding: 14, marginBottom: 12, ...shadow },
+  paymentOptionDisabled: { opacity: 0.55 },
   paymentOptionIcon: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center" },
   paymentOptionCopy: { flex: 1, marginLeft: 12 },
   paymentOptionTitle: { fontSize: 16, fontWeight: "600", color: colors.textPrimary },

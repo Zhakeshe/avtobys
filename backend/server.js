@@ -1,12 +1,19 @@
 const cors = require("cors");
 const crypto = require("crypto");
 const express = require("express");
-const fs = require("fs");
 const path = require("path");
+
+const {
+  getClient,
+  initDatabase,
+  maybeOne,
+  many,
+  query,
+  transaction,
+} = require("./db");
 
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
-const storePath = path.join(__dirname, "data", "store.json");
 const publicDir = path.join(__dirname, "public");
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -22,7 +29,6 @@ app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(publicDir));
 
-// HELPERS
 function nowIso() {
   return new Date().toISOString();
 }
@@ -45,6 +51,23 @@ function safeJsonObject(value) {
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
+  }
+}
+
+function safeJsonArray(value, fallback = []) {
+  try {
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeJsonParse(value, fallback = {}) {
+  try {
+    return JSON.parse(value || "{}");
+  } catch {
+    return fallback;
   }
 }
 
@@ -92,1081 +115,406 @@ function toBool(value, fallback = false) {
   return fallback;
 }
 
-// STORE
-function defaultStore() {
-  return {
-    meta: {
-      version: 3,
-      updatedAt: nowIso(),
-    },
-    appSettings: {
-      appName: "Avtobys MVP",
-      supportPhone: "+7 700-255-56-19",
-      supportTelegram: "@avtobys_support_bot",
-      loginDeliveryMode: "telegram",
-      defaultLanguage: "Русский",
-      availableLanguages: ["Русский", "Қазақша"],
-      shareUrl: "https://avtobys.local/app",
-      currencySymbol: "₸",
-      newUserBonusBalance: 3000,
-      minimumTopUpAmount: 500,
-      maintenanceMode: false,
-    },
-    cities: [
-      { id: "aktau", name: "Актау" },
-      { id: "astana", name: "Астана" },
-      { id: "almaty", name: "Алматы" },
-    ],
-    tariffs: [
-      { id: "aktau-standard", cityId: "aktau", name: "Стандарт", price: 70 },
-      { id: "aktau-student", cityId: "aktau", name: "Студент", price: 50 },
-      { id: "astana-standard", cityId: "astana", name: "Стандарт", price: 80 },
-      { id: "almaty-standard", cityId: "almaty", name: "Стандарт", price: 90 },
-    ],
-    buses: [
-      {
-        id: "bus-1",
-        cityId: "aktau",
-        number: "861AQ12",
-        routeNumber: "№ 11",
-        tariffId: "aktau-standard",
-        bluetoothEnabled: true,
-        validatorName: "861AQ12",
-        qrToken: "bus-1-qr",
-      },
-      {
-        id: "bus-2",
-        cityId: "astana",
-        number: "852CS02",
-        routeNumber: "№ 12",
-        tariffId: "astana-standard",
-        bluetoothEnabled: true,
-        validatorName: "852CS02",
-        qrToken: "bus-2-qr",
-      },
-      {
-        id: "bus-3",
-        cityId: "almaty",
-        number: "870KM05",
-        routeNumber: "№ 32",
-        tariffId: "almaty-standard",
-        bluetoothEnabled: true,
-        validatorName: "870KM05",
-        qrToken: "bus-3-qr",
-      },
-    ],
-    tickets: [],
-    users: [],
-    sessions: [],
-    authCodes: [],
-    walletTransactions: [],
-    supportMessages: [],
-    notifications: [],
-    telegramDeliveries: [],
-    admins: [
-      {
-        id: "admin-dev",
-        name: "Local Admin",
-        token: DEFAULT_ADMIN_TOKEN,
-      },
-    ],
-  };
+function toNumber(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
 }
 
-function migrateUser(user) {
-  const wallet = user.wallet || {};
-  const cards = Array.isArray(wallet.cards)
-    ? wallet.cards.map((card) => ({
-        id: card.id || id("card"),
-        holderName: card.holderName || "Моя карта",
-        number: normalizeCardNumber(card.number),
-        cardType: card.cardType === "transport" ? "transport" : "bank",
-        addedAt: card.addedAt || user.createdAt || nowIso(),
-      }))
-    : [];
-
-  return {
-    id: user.id || id("user"),
-    phoneNumber: normalizePhoneNumber(user.phoneNumber),
-    fullName: user.fullName || "Новый пользователь",
-    cityName: user.cityName || "",
-    telegramChatId: user.telegramChatId || "",
-    status: user.status || "active",
-    createdAt: user.createdAt || nowIso(),
-    updatedAt: user.updatedAt || nowIso(),
-    settings: {
-      language: user.settings?.language || "Русский",
-      notificationsEnabled: user.settings?.notificationsEnabled !== false,
-      appTheme: user.settings?.appTheme || "light",
-    },
-    wallet: {
-      balance: Number(wallet.balance || 0),
-      cards,
-      activeCardId: wallet.activeCardId || cards[0]?.id || null,
-    },
-  };
-}
-
-function migrateStore(store) {
-  const base = defaultStore();
-  const next = {
-    ...base,
-    ...store,
-  };
-
-  next.meta = {
-    ...base.meta,
-    ...(store.meta || {}),
-    version: 3,
-  };
-  next.appSettings = {
-    ...base.appSettings,
-    ...(store.appSettings || {}),
-  };
-  next.cities = Array.isArray(store.cities) && store.cities.length ? store.cities : base.cities;
-  next.tariffs =
-    Array.isArray(store.tariffs) && store.tariffs.length ? store.tariffs : base.tariffs;
-  next.buses = Array.isArray(store.buses) && store.buses.length
-    ? store.buses.map((bus) => ({
-        ...bus,
-        number: `${bus.number || ""}`.trim().toUpperCase(),
-        validatorName: `${bus.validatorName || bus.number || ""}`.trim().toUpperCase(),
-        qrToken: `${bus.qrToken || `qr-${bus.id || Date.now()}`}`.trim(),
-      }))
-    : base.buses;
-  next.tickets = Array.isArray(store.tickets) ? store.tickets : [];
-  next.users = Array.isArray(store.users) ? store.users.map(migrateUser) : [];
-  next.sessions = Array.isArray(store.sessions) ? store.sessions : [];
-  next.authCodes = Array.isArray(store.authCodes) ? store.authCodes : [];
-  next.walletTransactions = Array.isArray(store.walletTransactions)
-    ? store.walletTransactions
-    : [];
-  next.supportMessages = Array.isArray(store.supportMessages) ? store.supportMessages : [];
-  next.notifications = Array.isArray(store.notifications) ? store.notifications : [];
-  next.telegramDeliveries = Array.isArray(store.telegramDeliveries)
-    ? store.telegramDeliveries
-    : [];
-  next.admins =
-    Array.isArray(store.admins) && store.admins.length ? store.admins : base.admins;
-
-  return next;
-}
-
-function readStore() {
-  const raw = fs.existsSync(storePath) ? fs.readFileSync(storePath, "utf8") : "{}";
-  return migrateStore(JSON.parse(raw || "{}"));
-}
-
-function writeStore(store) {
-  fs.mkdirSync(path.dirname(storePath), { recursive: true });
-  store.meta = {
-    ...(store.meta || {}),
-    version: 3,
-    updatedAt: nowIso(),
-  };
-  fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-}
-
-// ROUTES
-app.get("/api/health", (_req, res) => {
-  const store = readStore();
-  res.json({
-    ok: true,
-    now: nowIso(),
-    ...serializeSummary(store),
-  });
-});
-
-app.get("/api/config/public", (_req, res) => {
-  const store = readStore();
-  res.json(serializePublicConfig(store));
-});
-
-app.get("/api/summary", (_req, res) => {
-  const store = readStore();
-  res.json(serializeSummary(store));
-});
-
-app.post("/api/auth/request-code", async (req, res) => {
+async function withClient(callback) {
+  const client = await getClient();
   try {
-    const store = readStore();
-    const phoneNumber = normalizePhoneNumber(req.body.phoneNumber);
-    if (!phoneNumber) {
-      res.status(400).json({ message: "Phone number is required" });
-      return;
-    }
-
-    const user = ensureUser(store, phoneNumber, {
-      fullName: req.body.fullName,
-      cityName: req.body.cityName,
-      telegramChatId: req.body.telegramChatId,
-    });
-    const code = createLoginCode();
-    const delivery = await sendTelegramCode(store, phoneNumber, code, req.body.telegramChatId);
-
-    store.authCodes = store.authCodes.filter(
-      (item) =>
-        item.phoneNumber !== phoneNumber &&
-        new Date(item.expiresAt).getTime() > Date.now() - AUTH_CODE_TTL_MS,
-    );
-    store.authCodes.push({
-      id: id("auth"),
-      phoneNumber,
-      code,
-      status: "pending",
-      attempts: 0,
-      createdAt: nowIso(),
-      expiresAt: futureIso(AUTH_CODE_TTL_MS),
-      deliveryId: delivery.id,
-    });
-    store.telegramDeliveries.push(delivery);
-    user.updatedAt = nowIso();
-    writeStore(store);
-
-    res.json({
-      ok: true,
-      phoneNumber,
-      expiresAt: futureIso(AUTH_CODE_TTL_MS),
-      delivery,
-      debugCode: IS_PROD ? undefined : code,
-    });
-  } catch (error) {
-    res.status(500).json({
-      message: error instanceof Error ? error.message : "Failed to request code",
-    });
+    return await callback(client);
+  } finally {
+    client.release();
   }
-});
+}
 
-app.post("/api/auth/verify-code", (req, res) => {
-  const store = readStore();
-  const phoneNumber = normalizePhoneNumber(req.body.phoneNumber);
-  const code = `${req.body.code || ""}`.trim();
-  if (!phoneNumber || !code) {
-    res.status(400).json({ message: "Phone number and code are required" });
-    return;
-  }
+async function getAppSettings(client) {
+  const row = await maybeOne("SELECT * FROM app_settings WHERE singleton_id = 1", [], client);
+  return mapAppSettings(row);
+}
 
-  const authCode = store.authCodes
-    .filter(
-      (item) =>
-        item.phoneNumber === phoneNumber &&
-        item.status === "pending" &&
-        new Date(item.expiresAt).getTime() > Date.now(),
-    )
-    .slice()
-    .reverse()
-    .find((item) => item.code === code);
-
-  if (!authCode) {
-    res.status(400).json({ message: "Invalid or expired code" });
-    return;
-  }
-
-  authCode.status = "used";
-  const user = ensureUser(store, phoneNumber, {
-    cityName: req.body.cityName,
-    fullName: req.body.fullName,
-  });
-  const session = issueSession(store, user);
-  writeStore(store);
-
-  res.json({
-    token: session.token,
-    user: serializeUser(user),
-    wallet: serializeWallet(store, user),
-    config: serializePublicConfig(store),
-  });
-});
-
-app.get("/api/auth/debug-last-code", (req, res) => {
-  if (IS_PROD) {
-    res.status(404).json({ message: "Not available" });
-    return;
-  }
-
-  const store = readStore();
-  const phoneNumber = normalizePhoneNumber(req.query.phone);
-  const latest = store.authCodes
-    .filter((item) => item.phoneNumber === phoneNumber)
-    .slice()
-    .reverse()[0];
-
-  res.json({
-    phoneNumber,
-    code: latest?.code || null,
-    status: latest?.status || null,
-    expiresAt: latest?.expiresAt || null,
-  });
-});
-
-app.get("/api/auth/me", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  writeStore(context.store);
-  res.json({
-    token: parseAuthToken(req),
-    user: serializeUser(context.user),
-    wallet: serializeWallet(context.store, context.user),
-    config: serializePublicConfig(context.store),
-  });
-});
-
-app.post("/api/auth/logout", (req, res) => {
-  const store = readStore();
-  const token = parseAuthToken(req);
-  if (token) {
-    store.sessions = store.sessions.filter((item) => item.token !== token);
-    writeStore(store);
-  }
-  res.json({ ok: true });
-});
-
-app.get("/api/me", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  writeStore(context.store);
-  res.json(serializeUser(context.user));
-});
-
-app.patch("/api/me", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  const { user, store } = context;
-  if (typeof req.body.fullName === "string" && req.body.fullName.trim()) {
-    user.fullName = req.body.fullName.trim();
-  }
-  if (typeof req.body.cityName === "string") {
-    user.cityName = req.body.cityName.trim();
-  }
-  if (typeof req.body.telegramChatId === "string") {
-    user.telegramChatId = req.body.telegramChatId.trim();
-  }
-  user.updatedAt = nowIso();
-  writeStore(store);
-  res.json(serializeUser(user));
-});
-
-app.get("/api/settings", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  writeStore(context.store);
-  res.json({
-    ...context.user.settings,
-    cityName: context.user.cityName,
-    supportPhone: context.store.appSettings.supportPhone,
-    supportTelegram: context.store.appSettings.supportTelegram,
-  });
-});
-
-app.patch("/api/settings", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  const { user, store } = context;
-  if (typeof req.body.language === "string" && req.body.language.trim()) {
-    user.settings.language = req.body.language.trim();
-  }
-  if (typeof req.body.notificationsEnabled === "boolean") {
-    user.settings.notificationsEnabled = req.body.notificationsEnabled;
-  }
-  if (typeof req.body.appTheme === "string" && req.body.appTheme.trim()) {
-    user.settings.appTheme = req.body.appTheme.trim();
-  }
-  if (typeof req.body.cityName === "string") {
-    user.cityName = req.body.cityName.trim();
-  }
-  user.updatedAt = nowIso();
-  writeStore(store);
-  res.json({
-    ...user.settings,
-    cityName: user.cityName,
-  });
-});
-
-app.get("/api/wallet", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  writeStore(context.store);
-  res.json(serializeWallet(context.store, context.user));
-});
-
-app.get("/api/wallet/cards", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  writeStore(context.store);
-  res.json(context.user.wallet.cards || []);
-});
-
-app.post("/api/wallet/cards", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  const holderName = `${req.body.holderName || ""}`.trim();
-  const number = normalizeCardNumber(req.body.number);
-  const cardType = req.body.cardType === "transport" ? "transport" : "bank";
-  const minLength = cardType === "transport" ? 6 : 12;
-
-  if (!holderName || number.length < minLength) {
-    res.status(400).json({ message: "Card payload is invalid" });
-    return;
-  }
-
-  const card = {
-    id: id("card"),
-    holderName,
-    number,
-    cardType,
-    addedAt: nowIso(),
+function mapAppSettings(row) {
+  return {
+    appName: row.app_name,
+    supportPhone: row.support_phone,
+    supportTelegram: row.support_telegram,
+    accessRequestTelegram: row.access_request_telegram,
+    loginDeliveryMode: row.login_delivery_mode,
+    defaultLanguage: row.default_language,
+    availableLanguages: safeJsonArray(row.available_languages_json, ["Русский", "Қазақша"]),
+    shareUrl: row.share_url,
+    currencySymbol: row.currency_symbol,
+    newUserBonusBalance: toNumber(row.new_user_bonus_balance),
+    minimumTopUpAmount: toNumber(row.minimum_top_up_amount),
+    trialRideCount: Number(row.trial_ride_count || 0),
+    maintenanceMode: Boolean(row.maintenance_mode),
   };
-  context.user.wallet.cards.push(card);
-  context.user.wallet.activeCardId = card.id;
-  context.user.updatedAt = nowIso();
-  writeStore(context.store);
-  res.status(201).json(card);
-});
+}
 
-app.patch("/api/wallet/cards/:cardId", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
+function serializePublicConfig(settings) {
+  return {
+    appName: settings.appName,
+    supportPhone: settings.supportPhone,
+    supportTelegram: settings.supportTelegram,
+    accessRequestTelegram: settings.accessRequestTelegram,
+    loginDeliveryMode: settings.loginDeliveryMode,
+    defaultLanguage: settings.defaultLanguage,
+    availableLanguages: settings.availableLanguages,
+    shareUrl: settings.shareUrl,
+    currencySymbol: settings.currencySymbol,
+    newUserBonusBalance: settings.newUserBonusBalance,
+    minimumTopUpAmount: settings.minimumTopUpAmount,
+    maintenanceMode: settings.maintenanceMode,
+    debugAuthCodeVisible: !IS_PROD,
+    trialRideCount: settings.trialRideCount,
+  };
+}
 
-  const card = context.user.wallet.cards.find((item) => item.id === req.params.cardId);
-  if (!card) {
-    res.status(404).json({ message: "Card not found" });
-    return;
-  }
-
-  if (typeof req.body.holderName === "string" && req.body.holderName.trim()) {
-    card.holderName = req.body.holderName.trim();
-  }
-  if (typeof req.body.number === "string" && req.body.number.trim()) {
-    card.number = normalizeCardNumber(req.body.number);
-  }
-  if (req.body.cardType === "transport" || req.body.cardType === "bank") {
-    card.cardType = req.body.cardType;
-  }
-  context.user.updatedAt = nowIso();
-  writeStore(context.store);
-  res.json(card);
-});
-
-app.delete("/api/wallet/cards/:cardId", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  context.user.wallet.cards = context.user.wallet.cards.filter(
-    (item) => item.id !== req.params.cardId,
-  );
-  if (
-    context.user.wallet.activeCardId === req.params.cardId &&
-    !context.user.wallet.cards.find((item) => item.id === req.params.cardId)
-  ) {
-    context.user.wallet.activeCardId = context.user.wallet.cards[0]?.id || null;
-  }
-  context.user.updatedAt = nowIso();
-  writeStore(context.store);
-  res.json({ ok: true });
-});
-
-app.post("/api/wallet/cards/:cardId/activate", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  const card = context.user.wallet.cards.find((item) => item.id === req.params.cardId);
-  if (!card) {
-    res.status(404).json({ message: "Card not found" });
-    return;
-  }
-
-  context.user.wallet.activeCardId = card.id;
-  context.user.updatedAt = nowIso();
-  writeStore(context.store);
-  res.json({ ok: true, activeCardId: card.id });
-});
-
-app.post("/api/wallet/top-up", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  const amount = parsePositiveAmount(req.body.amount);
-  const minimum = Number(context.store.appSettings.minimumTopUpAmount || 0);
-  if (!amount || amount < minimum) {
-    res.status(400).json({ message: `Minimum top-up amount is ${minimum}` });
-    return;
-  }
-
-  const before = Number(context.user.wallet.balance || 0);
-  const after = before + amount;
-  context.user.wallet.balance = after;
-  context.user.updatedAt = nowIso();
-  createWalletTransaction(context.store, context.user, {
-    type: "topup",
-    source: req.body.source || "manual",
-    description: req.body.description || "Balance top-up",
-    amount,
-    balanceBefore: before,
-    balanceAfter: after,
-    meta: {
-      cardId: req.body.cardId || context.user.wallet.activeCardId || null,
+function serializeUser(row) {
+  return {
+    id: row.id,
+    phoneNumber: row.phone_number,
+    fullName: row.full_name,
+    cityName: row.city_name,
+    telegramChatId: row.telegram_chat_id,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    rideAccessEnabled: Boolean(row.ride_access_enabled),
+    trialRidesRemaining: Number(row.trial_rides_remaining || 0),
+    accessRequestedAt: row.access_requested_at,
+    accessNote: row.access_note || "",
+    settings: {
+      language: row.settings_language,
+      notificationsEnabled: Boolean(row.settings_notifications_enabled),
+      appTheme: row.settings_app_theme,
     },
+  };
+}
+
+async function loadWallet(client, userId) {
+  const walletRow = await maybeOne(
+    "SELECT * FROM wallets WHERE user_id = $1",
+    [userId],
+    client,
+  );
+
+  if (!walletRow) {
+    return {
+      balance: 0,
+      cards: [],
+      activeCardId: null,
+      transactions: [],
+    };
+  }
+
+  const [bankCards, transportCards, transactions] = await Promise.all([
+    many("SELECT * FROM bank_cards WHERE user_id = $1 ORDER BY created_at DESC", [userId], client),
+    many("SELECT * FROM transport_cards WHERE user_id = $1 ORDER BY created_at DESC", [userId], client),
+    many(
+      "SELECT * FROM wallet_transactions WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId],
+      client,
+    ),
+  ]);
+
+  const cards = [
+    ...bankCards.map((item) => ({
+      id: item.id,
+      holderName: item.holder_name,
+      number: item.number,
+      cardType: "bank",
+      addedAt: item.created_at,
+    })),
+    ...transportCards.map((item) => ({
+      id: item.id,
+      holderName: item.holder_name,
+      number: item.number,
+      cardType: "transport",
+      balance: toNumber(item.balance),
+      addedAt: item.created_at,
+    })),
+  ].sort((left, right) => {
+    const leftTime = new Date(left.addedAt || 0).getTime();
+    const rightTime = new Date(right.addedAt || 0).getTime();
+    return rightTime - leftTime;
   });
-  writeStore(context.store);
-  res.json(serializeWallet(context.store, context.user));
-});
 
-app.get("/api/wallet/transactions", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
+  return {
+    balance: toNumber(walletRow.balance),
+    cards,
+    activeCardId: walletRow.active_card_id || null,
+    transactions: transactions.map((item) => ({
+      id: item.id,
+      type: item.type,
+      source: item.source,
+      description: item.description,
+      amount: toNumber(item.amount),
+      balanceBefore: toNumber(item.balance_before),
+      balanceAfter: toNumber(item.balance_after),
+      meta: safeJsonParse(item.meta_json),
+      createdAt: item.created_at,
+    })),
+  };
+}
 
-  writeStore(context.store);
-  res.json(
-    context.store.walletTransactions
-      .filter((item) => item.userId === context.user.id)
-      .slice()
-      .reverse(),
+async function createNotification(client, userId, title, body, type = "system") {
+  await client.query(
+    `
+    INSERT INTO notifications (id, user_id, title, body, type, is_read, created_at)
+    VALUES ($1, $2, $3, $4, $5, FALSE, CURRENT_TIMESTAMP)
+    `,
+    [id("notification"), userId, title, body, type],
   );
-});
+}
 
-app.get("/api/cities", (_req, res) => {
-  const store = readStore();
-  res.json(store.cities);
-});
+async function createWalletTransaction(client, userId, payload) {
+  await client.query(
+    `
+    INSERT INTO wallet_transactions (
+      id,
+      user_id,
+      type,
+      source,
+      description,
+      amount,
+      balance_before,
+      balance_after,
+      meta_json,
+      created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+    `,
+    [
+      id("txn"),
+      userId,
+      payload.type,
+      payload.source,
+      payload.description || "",
+      payload.amount,
+      payload.balanceBefore,
+      payload.balanceAfter,
+      JSON.stringify(payload.meta || {}),
+    ],
+  );
+}
 
-app.post("/api/cities", (req, res) => {
-  const store = readStore();
-  const name = `${req.body.name || ""}`.trim();
-  if (!name) {
-    res.status(400).json({ message: "City name is required" });
-    return;
+async function getCity(client, cityId) {
+  return maybeOne("SELECT * FROM cities WHERE id = $1", [cityId], client);
+}
+
+async function getCityByName(client, cityName) {
+  const normalized = `${cityName || ""}`.trim().toLowerCase();
+  if (!normalized) {
+    return null;
   }
+  return maybeOne(
+    "SELECT * FROM cities WHERE LOWER(TRIM(name)) = $1",
+    [normalized],
+    client,
+  );
+}
 
-  const city = {
-    id: req.body.id || id("city"),
-    name,
-  };
-  store.cities.push(city);
-  writeStore(store);
-  res.status(201).json(city);
-});
+async function getTariff(client, tariffId) {
+  return maybeOne("SELECT * FROM tariffs WHERE id = $1", [tariffId], client);
+}
 
-app.patch("/api/cities/:cityId", (req, res) => {
-  const store = readStore();
-  const city = getCity(store, req.params.cityId);
-  if (!city) {
-    res.status(404).json({ message: "City not found" });
-    return;
+async function getBus(client, busId) {
+  return maybeOne("SELECT * FROM buses WHERE id = $1", [busId], client);
+}
+
+async function fetchBuses(client, options = {}) {
+  const conditions = [];
+  const params = [];
+
+  if (options.cityId) {
+    params.push(options.cityId);
+    conditions.push(`b.city_id = $${params.length}`);
   }
-
-  if (typeof req.body.name === "string" && req.body.name.trim()) {
-    city.name = req.body.name.trim();
-  }
-  writeStore(store);
-  res.json(city);
-});
-
-app.delete("/api/cities/:cityId", (req, res) => {
-  const store = readStore();
-  store.cities = store.cities.filter((item) => item.id !== req.params.cityId);
-  store.tariffs = store.tariffs.filter((item) => item.cityId !== req.params.cityId);
-  store.buses = store.buses.filter((item) => item.cityId !== req.params.cityId);
-  writeStore(store);
-  res.json({ ok: true });
-});
-
-app.get("/api/tariffs", (req, res) => {
-  const store = readStore();
-  const cityId = `${req.query.cityId || ""}`.trim();
-  const tariffs = cityId
-    ? store.tariffs.filter((item) => item.cityId === cityId)
-    : store.tariffs;
-  res.json(tariffs.map((item) => ({ ...item, price: Number(item.price || 0) })));
-});
-
-app.post("/api/tariffs", (req, res) => {
-  const store = readStore();
-  if (!getCity(store, req.body.cityId)) {
-    res.status(400).json({ message: "City not found" });
-    return;
-  }
-
-  const tariff = {
-    id: req.body.id || id("tariff"),
-    cityId: req.body.cityId,
-    name: `${req.body.name || ""}`.trim() || "Стандарт",
-    price: parsePositiveAmount(req.body.price),
-  };
-  store.tariffs.push(tariff);
-  writeStore(store);
-  res.status(201).json(tariff);
-});
-
-app.patch("/api/tariffs/:tariffId", (req, res) => {
-  const store = readStore();
-  const tariff = getTariff(store, req.params.tariffId);
-  if (!tariff) {
-    res.status(404).json({ message: "Tariff not found" });
-    return;
-  }
-
-  if (typeof req.body.name === "string" && req.body.name.trim()) {
-    tariff.name = req.body.name.trim();
-  }
-  if (req.body.price !== undefined) {
-    tariff.price = parsePositiveAmount(req.body.price);
-  }
-  writeStore(store);
-  res.json(tariff);
-});
-
-app.delete("/api/tariffs/:tariffId", (req, res) => {
-  const store = readStore();
-  store.tariffs = store.tariffs.filter((item) => item.id !== req.params.tariffId);
-  store.buses = store.buses.filter((item) => item.tariffId !== req.params.tariffId);
-  writeStore(store);
-  res.json({ ok: true });
-});
-
-app.get("/api/buses", (req, res) => {
-  const store = readStore();
-  const cityId = `${req.query.cityId || ""}`.trim();
-  const number = normalizeTransportValue(req.query.number);
-  const qrToken = `${req.query.qrToken || ""}`.trim();
-  const bluetoothOnly = req.query.bluetooth === "true";
-
-  let buses = store.buses.slice();
-  if (cityId) {
-    buses = buses.filter((item) => item.cityId === cityId);
-  }
-  if (number) {
-    buses = buses.filter((item) =>
-      normalizeTransportValue(item.number).includes(number) ||
-      normalizeTransportValue(item.validatorName || "").includes(number),
+  if (options.number) {
+    params.push(`%${normalizeTransportValue(options.number)}%`);
+    conditions.push(
+      `(UPPER(b.number) LIKE $${params.length} OR UPPER(b.validator_name) LIKE $${params.length})`,
     );
   }
-  if (qrToken) {
-    buses = buses.filter(
-      (item) =>
-        item.qrToken === qrToken ||
-        normalizeTransportValue(item.number) === normalizeTransportValue(qrToken),
-    );
+  if (options.qrToken) {
+    params.push(options.qrToken.trim());
+    conditions.push(`(b.qr_token = $${params.length} OR UPPER(b.number) = UPPER($${params.length}))`);
   }
-  if (bluetoothOnly) {
-    buses = buses.filter((item) => Boolean(item.bluetoothEnabled));
+  if (options.bluetoothOnly) {
+    conditions.push("b.bluetooth_enabled = TRUE");
   }
 
-  res.json(buses.map((item) => withBusRelations(store, item)));
-});
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
-app.post("/api/buses", (req, res) => {
-  const store = readStore();
-  if (!getCity(store, req.body.cityId) || !getTariff(store, req.body.tariffId)) {
-    res.status(400).json({ message: "City or tariff not found" });
-    return;
-  }
-
-  const bus = {
-    id: req.body.id || id("bus"),
-    cityId: req.body.cityId,
-    number: `${req.body.number || ""}`.trim().toUpperCase(),
-    routeNumber: `${req.body.routeNumber || ""}`.trim() || "№ 1",
-    tariffId: req.body.tariffId,
-    bluetoothEnabled: toBool(req.body.bluetoothEnabled, true),
-    validatorName: `${req.body.validatorName || req.body.number || ""}`.trim().toUpperCase(),
-    qrToken: `${req.body.qrToken || `qr-${Date.now()}`}`.trim(),
-  };
-  if (!bus.number) {
-    res.status(400).json({ message: "Bus number is required" });
-    return;
-  }
-
-  store.buses.push(bus);
-  writeStore(store);
-  res.status(201).json(withBusRelations(store, bus));
-});
-
-app.patch("/api/buses/:busId", (req, res) => {
-  const store = readStore();
-  const bus = getBus(store, req.params.busId);
-  if (!bus) {
-    res.status(404).json({ message: "Bus not found" });
-    return;
-  }
-
-  if (typeof req.body.number === "string" && req.body.number.trim()) {
-    bus.number = req.body.number.trim().toUpperCase();
-  }
-  if (typeof req.body.routeNumber === "string" && req.body.routeNumber.trim()) {
-    bus.routeNumber = req.body.routeNumber.trim();
-  }
-  if (typeof req.body.tariffId === "string" && getTariff(store, req.body.tariffId)) {
-    bus.tariffId = req.body.tariffId;
-  }
-  if (typeof req.body.qrToken === "string" && req.body.qrToken.trim()) {
-    bus.qrToken = req.body.qrToken.trim();
-  }
-  if (req.body.bluetoothEnabled !== undefined) {
-    bus.bluetoothEnabled = toBool(req.body.bluetoothEnabled, bus.bluetoothEnabled);
-  }
-  if (typeof req.body.validatorName === "string" && req.body.validatorName.trim()) {
-    bus.validatorName = req.body.validatorName.trim().toUpperCase();
-  }
-  writeStore(store);
-  res.json(withBusRelations(store, bus));
-});
-
-app.delete("/api/buses/:busId", (req, res) => {
-  const store = readStore();
-  store.buses = store.buses.filter((item) => item.id !== req.params.busId);
-  writeStore(store);
-  res.json({ ok: true });
-});
-
-app.get("/api/tickets", (req, res) => {
-  const store = readStore();
-  const auth = getSessionContext(req, store);
-  const phoneNumber = normalizePhoneNumber(req.query.phone);
-  const targetPhone = auth?.user.phoneNumber || phoneNumber;
-  const tickets = targetPhone
-    ? store.tickets.filter(
-        (item) => normalizePhoneNumber(item.phoneNumber) === targetPhone,
-      )
-    : store.tickets;
-
-  writeStore(store);
-  res.json(tickets.slice().reverse().map((item) => withTicketRelations(store, item)));
-});
-
-app.post("/api/tickets", (req, res) => {
-  const store = readStore();
-  const auth = getSessionContext(req, store);
-  const user =
-    auth?.user ||
-    (req.body.phoneNumber ? ensureUser(store, normalizePhoneNumber(req.body.phoneNumber)) : null);
-
-  if (!user) {
-    res.status(401).json({ message: "Authentication or phone number is required" });
-    return;
-  }
-
-  const bus = getBus(store, req.body.busId);
-  if (!bus) {
-    res.status(404).json({ message: "Bus not found" });
-    return;
-  }
-
-  const relatedBus = withBusRelations(store, bus);
-  const amount = Number(relatedBus.price || 0);
-  const paymentMethod = `${req.body.paymentMethod || "wallet"}`.trim();
-  const requestedCity =
-    getCity(store, `${req.body.cityId || ""}`.trim()) ||
-    getCityByName(store, req.body.cityName) ||
-    getCityByName(store, user.cityName) ||
-    getCity(store, bus.cityId);
-
-  if (paymentMethod === "wallet") {
-    const before = Number(user.wallet.balance || 0);
-    if (before < amount) {
-      res.status(400).json({ message: "Insufficient wallet balance" });
-      return;
-    }
-    user.wallet.balance = before - amount;
-    createWalletTransaction(store, user, {
-      type: "ride",
-      source: "ticket",
-      description: `Ride payment for ${relatedBus.number}`,
-      amount: -amount,
-      balanceBefore: before,
-      balanceAfter: user.wallet.balance,
-      meta: {
-        busId: bus.id,
-        routeNumber: relatedBus.routeNumber,
-      },
-    });
-  }
-
-  const ticket = {
-    id: id("ticket"),
-    userId: user.id,
-    phoneNumber: user.phoneNumber,
-    cityId: requestedCity?.id || bus.cityId,
-    cityName: requestedCity?.name || user.cityName || relatedBus.cityName,
-    busId: bus.id,
-    busNumber: relatedBus.number,
-    routeNumber: relatedBus.routeNumber,
-    tariffName: relatedBus.tariffName,
-    amount,
-    paymentMethod,
-    qrValue: `${bus.qrToken}:${Date.now()}`,
-    paidAt: nowIso(),
-    validUntil: futureIso(RIDE_TICKET_TTL_MS),
-    status: "active",
-  };
-
-  store.tickets.push(ticket);
-  user.updatedAt = nowIso();
-  createNotification(
-    store,
-    user.id,
-    "Оплата проезда",
-    `${relatedBus.routeNumber} • ${amount} ${store.appSettings.currencySymbol}`,
-    "ticket",
+  const rows = await many(
+    `
+    SELECT
+      b.*,
+      c.name AS city_name,
+      t.name AS tariff_name,
+      t.price AS tariff_price
+    FROM buses b
+    INNER JOIN cities c ON c.id = b.city_id
+    INNER JOIN tariffs t ON t.id = b.tariff_id
+    ${whereClause}
+    ORDER BY c.name ASC, b.route_number ASC, b.number ASC
+    `,
+    params,
+    client,
   );
-  writeStore(store);
-  res.status(201).json(withTicketRelations(store, ticket));
-});
 
-app.post("/api/support", (req, res) => {
-  const store = readStore();
-  const user = findUserFromRequest(store, req);
-  const message = `${req.body.message || ""}`.trim();
-  if (!message) {
-    res.status(400).json({ message: "Message is required" });
-    return;
-  }
+  return rows.map(serializeBusRow);
+}
 
-  const entry = {
-    id: id("support"),
-    userId: user?.id || null,
-    phoneNumber: user?.phoneNumber || normalizePhoneNumber(req.body.phoneNumber),
-    subject: `${req.body.subject || "Support request"}`.trim(),
-    message,
-    status: "new",
-    createdAt: nowIso(),
+function serializeBusRow(row) {
+  return {
+    id: row.id,
+    cityId: row.city_id,
+    cityName: row.city_name || "",
+    number: row.number,
+    validatorName: row.validator_name,
+    routeNumber: row.route_number,
+    tariffId: row.tariff_id,
+    tariffName: row.tariff_name || "",
+    price: toNumber(row.tariff_price),
+    bluetoothEnabled: Boolean(row.bluetooth_enabled),
+    qrToken: row.qr_token,
   };
-  store.supportMessages.push(entry);
-  if (user) {
-    createNotification(store, user.id, "Support request", "Support request created.");
-  }
-  writeStore(store);
-  res.status(201).json(entry);
-});
+}
 
-app.get("/api/notifications", (req, res) => {
-  const store = readStore();
-  const user = findUserFromRequest(store, req);
-  if (!user) {
-    res.json([]);
-    return;
-  }
+function serializeTicketRow(row) {
+  return {
+    id: row.id,
+    phoneNumber: row.phone_number,
+    cityId: row.city_id,
+    cityName: row.city_name,
+    busId: row.bus_id,
+    busNumber: row.bus_number,
+    routeNumber: row.route_number,
+    tariffName: row.tariff_name,
+    amount: toNumber(row.amount),
+    paymentMethod: row.payment_method,
+    accessMode: row.access_mode,
+    qrValue: row.qr_value,
+    paidAt: row.paid_at,
+    validUntil: row.valid_until,
+    status: row.status,
+  };
+}
 
-  writeStore(store);
-  res.json(
-    store.notifications
-      .filter((item) => item.userId === user.id)
-      .slice()
-      .reverse(),
-  );
-});
-
-app.patch("/api/notifications/:notificationId/read", (req, res) => {
-  const context = requireUserContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  const notification = context.store.notifications.find(
-    (item) =>
-      item.id === req.params.notificationId && item.userId === context.user.id,
-  );
-  if (!notification) {
-    res.status(404).json({ message: "Notification not found" });
-    return;
-  }
-
-  notification.read = true;
-  writeStore(context.store);
-  res.json(notification);
-});
-function ensureUser(store, phoneNumber, payload = {}) {
+async function ensureUser(client, phoneNumber, payload = {}) {
   const normalizedPhone = normalizePhoneNumber(phoneNumber);
-  let user = store.users.find((item) => item.phoneNumber === normalizedPhone);
+  let user = await maybeOne(
+    "SELECT * FROM users WHERE phone_number = $1",
+    [normalizedPhone],
+    client,
+  );
 
   if (!user) {
-    user = migrateUser({
-      id: id("user"),
-      phoneNumber: normalizedPhone,
-      fullName: payload.fullName || "Новый пользователь",
-      cityName: payload.cityName || "",
-      telegramChatId: payload.telegramChatId || "",
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-      wallet: {
-        balance: Number(store.appSettings.newUserBonusBalance || 0),
-        cards: [],
-        activeCardId: null,
-      },
-    });
-    store.users.push(user);
-    createNotification(store, user.id, "Добро пожаловать", "Аккаунт создан и готов к поездкам.");
+    const settings = await getAppSettings(client);
+    const userId = id("user");
+    await client.query(
+      `
+      INSERT INTO users (
+        id,
+        phone_number,
+        full_name,
+        city_name,
+        telegram_chat_id,
+        status,
+        ride_access_enabled,
+        trial_rides_remaining,
+        access_note,
+        settings_language,
+        settings_notifications_enabled,
+        settings_app_theme,
+        created_at,
+        updated_at
+      ) VALUES ($1, $2, $3, $4, $5, 'active', FALSE, $6, '', $7, TRUE, 'light', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `,
+      [
+        userId,
+        normalizedPhone,
+        payload.fullName || "Новый пользователь",
+        payload.cityName || "",
+        payload.telegramChatId || "",
+        settings.trialRideCount,
+        settings.defaultLanguage,
+      ],
+    );
+    await client.query(
+      `
+      INSERT INTO wallets (id, user_id, balance, active_card_id, created_at, updated_at)
+      VALUES ($1, $2, $3, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `,
+      [id("wallet"), userId, settings.newUserBonusBalance],
+    );
+    await createNotification(
+      client,
+      userId,
+      "Добро пожаловать",
+      "Аккаунт создан. Доступны 2 бесплатные пробные поездки.",
+      "system",
+    );
+    user = await maybeOne("SELECT * FROM users WHERE id = $1", [userId], client);
   } else {
-    if (payload.fullName) {
-      user.fullName = payload.fullName;
-    }
-    if (payload.cityName) {
-      user.cityName = payload.cityName;
-    }
-    if (payload.telegramChatId) {
-      user.telegramChatId = payload.telegramChatId;
-    }
-    user.updatedAt = nowIso();
+    const nextFullName =
+      typeof payload.fullName === "string" && payload.fullName.trim()
+        ? payload.fullName.trim()
+        : user.full_name;
+    const nextCityName =
+      Object.prototype.hasOwnProperty.call(payload, "cityName")
+        ? `${payload.cityName || ""}`.trim()
+        : user.city_name;
+    const nextTelegramChatId =
+      Object.prototype.hasOwnProperty.call(payload, "telegramChatId")
+        ? `${payload.telegramChatId || ""}`.trim()
+        : user.telegram_chat_id;
+
+    await client.query(
+      `
+      UPDATE users
+      SET full_name = $2,
+          city_name = $3,
+          telegram_chat_id = $4,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      `,
+      [user.id, nextFullName, nextCityName, nextTelegramChatId],
+    );
+    user = await maybeOne("SELECT * FROM users WHERE id = $1", [user.id], client);
   }
 
   return user;
 }
 
-function serializeUser(user) {
-  return {
-    id: user.id,
-    phoneNumber: user.phoneNumber,
-    fullName: user.fullName,
-    cityName: user.cityName,
-    telegramChatId: user.telegramChatId,
-    status: user.status,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
-    settings: user.settings,
-  };
-}
-
-function serializePublicConfig(store) {
-  return {
-    appName: store.appSettings.appName,
-    supportPhone: store.appSettings.supportPhone,
-    supportTelegram: store.appSettings.supportTelegram,
-    loginDeliveryMode: store.appSettings.loginDeliveryMode,
-    defaultLanguage: store.appSettings.defaultLanguage,
-    availableLanguages: store.appSettings.availableLanguages,
-    shareUrl: store.appSettings.shareUrl,
-    currencySymbol: store.appSettings.currencySymbol,
-    newUserBonusBalance: Number(store.appSettings.newUserBonusBalance || 0),
-    minimumTopUpAmount: Number(store.appSettings.minimumTopUpAmount || 0),
-    maintenanceMode: Boolean(store.appSettings.maintenanceMode),
-    debugAuthCodeVisible: !IS_PROD,
-  };
-}
-
-function serializeWallet(store, user) {
-  return {
-    balance: Number(user.wallet.balance || 0),
-    cards: user.wallet.cards || [],
-    activeCardId: user.wallet.activeCardId || null,
-    transactions: store.walletTransactions
-      .filter((item) => item.userId === user.id)
-      .slice()
-      .reverse(),
-  };
-}
-
-function getCity(store, cityId) {
-  return store.cities.find((item) => item.id === cityId) || null;
-}
-
-function getCityByName(store, cityName) {
-  const normalizedName = `${cityName || ""}`.trim().toLowerCase();
-  if (!normalizedName) {
-    return null;
-  }
-
-  return (
-    store.cities.find((item) => `${item.name || ""}`.trim().toLowerCase() === normalizedName) ||
-    null
-  );
-}
-
-function getTariff(store, tariffId) {
-  return store.tariffs.find((item) => item.id === tariffId) || null;
-}
-
-function getBus(store, busId) {
-  return store.buses.find((item) => item.id === busId) || null;
-}
-
-function withBusRelations(store, bus) {
-  const tariff = getTariff(store, bus.tariffId);
-  const city = getCity(store, bus.cityId);
-  return {
-    ...bus,
-    cityName: city?.name || "",
-    tariffName: tariff?.name || "",
-    price: Number(tariff?.price || 0),
-  };
-}
-
-function withTicketRelations(store, ticket) {
-  const bus = getBus(store, ticket.busId);
-  const city = getCity(store, ticket.cityId || bus?.cityId);
-  const tariff = getTariff(store, bus?.tariffId);
-  return {
-    ...ticket,
-    cityId: ticket.cityId || bus?.cityId || "",
-    cityName: ticket.cityName || city?.name || "",
-    busNumber: ticket.busNumber || bus?.number || "",
-    routeNumber: ticket.routeNumber || bus?.routeNumber || "",
-    tariffName: ticket.tariffName || tariff?.name || "",
-    amount: Number(ticket.amount || tariff?.price || 0),
-  };
-}
-
-function createNotification(store, userId, title, body, type = "system") {
-  const notification = {
-    id: id("notification"),
+async function issueSession(client, userId) {
+  const session = {
+    id: id("session"),
+    token: crypto.randomBytes(24).toString("hex"),
     userId,
-    title,
-    body,
-    type,
-    read: false,
     createdAt: nowIso(),
+    lastSeenAt: nowIso(),
+    expiresAt: futureIso(SESSION_TTL_MS),
   };
-  store.notifications.push(notification);
-  return notification;
-}
 
-function createWalletTransaction(store, user, payload) {
-  const transaction = {
-    id: id("txn"),
-    userId: user.id,
-    type: payload.type,
-    source: payload.source,
-    description: payload.description || "",
-    amount: Number(payload.amount || 0),
-    balanceBefore: Number(payload.balanceBefore || 0),
-    balanceAfter: Number(payload.balanceAfter || 0),
-    meta: payload.meta || {},
-    createdAt: nowIso(),
-  };
-  store.walletTransactions.push(transaction);
-  return transaction;
+  await client.query(
+    `
+    INSERT INTO sessions (id, token, user_id, created_at, last_seen_at, expires_at)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    `,
+    [
+      session.id,
+      session.token,
+      session.userId,
+      session.createdAt,
+      session.lastSeenAt,
+      session.expiresAt,
+    ],
+  );
+
+  return session;
 }
 
 function parseAuthToken(req) {
@@ -1175,53 +523,66 @@ function parseAuthToken(req) {
     return authorization.slice("Bearer ".length).trim();
   }
   const headerToken = req.headers["x-session-token"];
-  return typeof headerToken === "string" ? headerToken : "";
+  return typeof headerToken === "string" ? headerToken.trim() : "";
 }
 
-function getSessionContext(req, store) {
+async function getSessionContext(req, client) {
   const token = parseAuthToken(req);
   if (!token) {
     return null;
   }
 
-  store.sessions = store.sessions.filter(
-    (item) => new Date(item.expiresAt).getTime() > Date.now(),
+  const currentTimestamp = nowIso();
+  await client.query("DELETE FROM sessions WHERE expires_at <= $1", [currentTimestamp]);
+
+  const row = await maybeOne(
+    `
+    SELECT
+      s.id AS session_id,
+      s.token AS session_token,
+      s.user_id AS session_user_id,
+      s.created_at AS session_created_at,
+      s.last_seen_at AS session_last_seen_at,
+      s.expires_at AS session_expires_at,
+      u.*
+    FROM sessions s
+    INNER JOIN users u ON u.id = s.user_id
+    WHERE s.token = $1
+      AND s.expires_at > $2
+    `,
+    [token, currentTimestamp],
+    client,
   );
-  const session = store.sessions.find((item) => item.token === token);
-  if (!session) {
+
+  if (!row) {
     return null;
   }
 
-  const user = store.users.find((item) => item.id === session.userId);
-  if (!user) {
-    return null;
-  }
+  await client.query(
+    "UPDATE sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = $1",
+    [row.session_id],
+  );
 
-  session.lastSeenAt = nowIso();
-  return { session, user };
-}
-
-function issueSession(store, user) {
-  const session = {
-    id: id("session"),
-    token: crypto.randomBytes(24).toString("hex"),
-    userId: user.id,
-    createdAt: nowIso(),
-    lastSeenAt: nowIso(),
-    expiresAt: futureIso(SESSION_TTL_MS),
+  return {
+    session: {
+      id: row.session_id,
+      token: row.session_token,
+      userId: row.session_user_id,
+      createdAt: row.session_created_at,
+      lastSeenAt: row.session_last_seen_at,
+      expiresAt: row.session_expires_at,
+    },
+    user: row,
   };
-  store.sessions.push(session);
-  return session;
 }
 
-function requireUserContext(req, res) {
-  const store = readStore();
-  const context = getSessionContext(req, store);
+async function requireUserContext(req, res, client) {
+  const context = await getSessionContext(req, client);
   if (!context) {
     res.status(401).json({ message: "Unauthorized" });
     return null;
   }
-  return { store, ...context };
+  return context;
 }
 
 function getAdminToken(req) {
@@ -1235,31 +596,40 @@ function getAdminToken(req) {
   return "";
 }
 
-function requireAdminContext(req, res) {
-  const store = readStore();
+async function requireAdminContext(req, res, client) {
   const token = getAdminToken(req);
-  const admin = store.admins.find((item) => item.token === token);
+  if (!token) {
+    res.status(401).json({ message: "Admin token required" });
+    return null;
+  }
+
+  const admin = await maybeOne("SELECT * FROM admins WHERE token = $1", [token], client);
   if (!admin) {
     res.status(401).json({ message: "Admin token required" });
     return null;
   }
-  return { store, admin };
+
+  return { admin };
 }
 
-function resolveTelegramChatId(store, phoneNumber, explicitChatId) {
+async function resolveTelegramChatId(client, phoneNumber, explicitChatId) {
   const normalizedPhone = normalizePhoneNumber(phoneNumber);
-  const user = store.users.find((item) => item.phoneNumber === normalizedPhone);
+  const user = await maybeOne(
+    "SELECT telegram_chat_id FROM users WHERE phone_number = $1",
+    [normalizedPhone],
+    client,
+  );
   return (
     explicitChatId ||
-    user?.telegramChatId ||
+    user?.telegram_chat_id ||
     TELEGRAM_CHAT_MAP[normalizedPhone] ||
     TELEGRAM_DEFAULT_CHAT_ID ||
     ""
   );
 }
 
-async function sendTelegramCode(store, phoneNumber, code, explicitChatId) {
-  const chatId = resolveTelegramChatId(store, phoneNumber, explicitChatId);
+async function sendTelegramCode(client, settings, phoneNumber, code, explicitChatId) {
+  const chatId = await resolveTelegramChatId(client, phoneNumber, explicitChatId);
   const delivery = {
     id: id("delivery"),
     phoneNumber,
@@ -1273,27 +643,27 @@ async function sendTelegramCode(store, phoneNumber, code, explicitChatId) {
 
   if (!chatId) {
     delivery.status = "chat-not-configured";
+    delivery.error = `Bind Telegram or write to ${settings.accessRequestTelegram}`;
     return delivery;
   }
 
   if (!TELEGRAM_BOT_TOKEN || typeof fetch !== "function") {
     delivery.status = TELEGRAM_BOT_TOKEN ? "fetch-unavailable" : "bot-not-configured";
+    delivery.error = `Telegram bot is not configured. Support: ${settings.accessRequestTelegram}`;
     return delivery;
   }
 
   try {
-    const response = await fetch(
-      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: delivery.messageText,
-        }),
+    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
-    );
-
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: delivery.messageText,
+      }),
+    });
     const responseText = await response.text();
     delivery.responseBody = responseText;
     delivery.status = response.ok ? "sent" : "failed";
@@ -1308,170 +678,2006 @@ async function sendTelegramCode(store, phoneNumber, code, explicitChatId) {
   return delivery;
 }
 
-function serializeSummary(store) {
+async function storeTelegramDelivery(client, delivery) {
+  await client.query(
+    `
+    INSERT INTO telegram_deliveries (
+      id,
+      phone_number,
+      chat_id,
+      status,
+      message_text,
+      response_body,
+      error,
+      created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `,
+    [
+      delivery.id,
+      delivery.phoneNumber,
+      delivery.chatId || "",
+      delivery.status,
+      delivery.messageText,
+      delivery.responseBody || "",
+      delivery.error || "",
+      delivery.createdAt,
+    ],
+  );
+}
+
+async function getSummary(client) {
+  const [
+    cities,
+    tariffs,
+    buses,
+    tickets,
+    users,
+    sessions,
+    walletTransactions,
+    supportMessages,
+    telegramDeliveries,
+    totalWalletBalance,
+    usersWithRideAccess,
+    pendingAccessRequests,
+  ] = await Promise.all([
+    maybeOne("SELECT COUNT(*)::int AS count FROM cities", [], client),
+    maybeOne("SELECT COUNT(*)::int AS count FROM tariffs", [], client),
+    maybeOne("SELECT COUNT(*)::int AS count FROM buses", [], client),
+    maybeOne("SELECT COUNT(*)::int AS count FROM tickets", [], client),
+    maybeOne("SELECT COUNT(*)::int AS count FROM users", [], client),
+    maybeOne("SELECT COUNT(*)::int AS count FROM sessions", [], client),
+    maybeOne("SELECT COUNT(*)::int AS count FROM wallet_transactions", [], client),
+    maybeOne("SELECT COUNT(*)::int AS count FROM support_messages", [], client),
+    maybeOne("SELECT COUNT(*)::int AS count FROM telegram_deliveries", [], client),
+    maybeOne("SELECT COALESCE(SUM(balance), 0)::numeric AS total FROM wallets", [], client),
+    maybeOne("SELECT COUNT(*)::int AS count FROM users WHERE ride_access_enabled = TRUE", [], client),
+    maybeOne("SELECT COUNT(*)::int AS count FROM users WHERE access_requested_at IS NOT NULL", [], client),
+  ]);
+
   return {
-    cities: store.cities.length,
-    tariffs: store.tariffs.length,
-    buses: store.buses.length,
-    tickets: store.tickets.length,
-    users: store.users.length,
-    sessions: store.sessions.length,
-    walletTransactions: store.walletTransactions.length,
-    supportMessages: store.supportMessages.length,
-    telegramDeliveries: store.telegramDeliveries.length,
-    totalWalletBalance: store.users.reduce(
-      (sum, user) => sum + Number(user.wallet.balance || 0),
-      0,
-    ),
+    cities: cities?.count || 0,
+    tariffs: tariffs?.count || 0,
+    buses: buses?.count || 0,
+    tickets: tickets?.count || 0,
+    users: users?.count || 0,
+    sessions: sessions?.count || 0,
+    walletTransactions: walletTransactions?.count || 0,
+    supportMessages: supportMessages?.count || 0,
+    telegramDeliveries: telegramDeliveries?.count || 0,
+    totalWalletBalance: toNumber(totalWalletBalance?.total),
+    usersWithRideAccess: usersWithRideAccess?.count || 0,
+    pendingAccessRequests: pendingAccessRequests?.count || 0,
   };
 }
 
-function findUserFromRequest(store, req) {
-  const auth = getSessionContext(req, store);
+async function findUserFromRequest(client, req) {
+  const auth = await getSessionContext(req, client);
   if (auth) {
     return auth.user;
   }
 
   const phoneNumber =
     normalizePhoneNumber(req.query.phone) || normalizePhoneNumber(req.body.phoneNumber);
-  return phoneNumber ? ensureUser(store, phoneNumber) : null;
+
+  if (!phoneNumber) {
+    return null;
+  }
+
+  return ensureUser(client, phoneNumber);
 }
 
-app.get("/api/admin/summary", (req, res) => {
-  const context = requireAdminContext(req, res);
-  if (!context) {
-    return;
+async function fetchTicketsForUser(client, options = {}) {
+  const conditions = [];
+  const params = [];
+
+  if (options.userId) {
+    params.push(options.userId);
+    conditions.push(`user_id = $${params.length}`);
+  }
+  if (options.phoneNumber) {
+    params.push(normalizePhoneNumber(options.phoneNumber));
+    conditions.push(`phone_number = $${params.length}`);
   }
 
-  res.json({
-    ...serializeSummary(context.store),
-    admin: {
-      id: context.admin.id,
-      name: context.admin.name,
-    },
-  });
-});
-
-app.get("/api/admin/users", (req, res) => {
-  const context = requireAdminContext(req, res);
-  if (!context) {
-    return;
-  }
-
-  res.json(
-    context.store.users.map((user) => ({
-      ...serializeUser(user),
-      wallet: serializeWallet(context.store, user),
-    })),
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const rows = await many(
+    `SELECT * FROM tickets ${whereClause} ORDER BY paid_at DESC`,
+    params,
+    client,
   );
+  return rows.map(serializeTicketRow);
+}
+
+app.get("/api/health", async (_req, res) => {
+  try {
+    const summary = await withClient((client) => getSummary(client));
+    res.json({
+      ok: true,
+      now: nowIso(),
+      ...summary,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Health failed" });
+  }
 });
 
-app.patch("/api/admin/users/:userId", (req, res) => {
-  const context = requireAdminContext(req, res);
-  if (!context) {
-    return;
+app.get("/api/config/public", async (_req, res) => {
+  try {
+    const config = await withClient(async (client) => serializePublicConfig(await getAppSettings(client)));
+    res.json(config);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Config failed" });
   }
-
-  const user = context.store.users.find((item) => item.id === req.params.userId);
-  if (!user) {
-    res.status(404).json({ message: "User not found" });
-    return;
-  }
-
-  if (typeof req.body.fullName === "string" && req.body.fullName.trim()) {
-    user.fullName = req.body.fullName.trim();
-  }
-  if (typeof req.body.cityName === "string") {
-    user.cityName = req.body.cityName.trim();
-  }
-  if (typeof req.body.status === "string" && req.body.status.trim()) {
-    user.status = req.body.status.trim();
-  }
-  if (typeof req.body.telegramChatId === "string") {
-    user.telegramChatId = req.body.telegramChatId.trim();
-  }
-  if (req.body.balance !== undefined) {
-    user.wallet.balance = Number(req.body.balance || 0);
-  }
-  user.updatedAt = nowIso();
-  writeStore(context.store);
-  res.json({
-    ...serializeUser(user),
-    wallet: serializeWallet(context.store, user),
-  });
 });
 
-app.get("/api/admin/transactions", (req, res) => {
-  const context = requireAdminContext(req, res);
-  if (!context) {
-    return;
+app.get("/api/summary", async (_req, res) => {
+  try {
+    res.json(await withClient((client) => getSummary(client)));
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Summary failed" });
   }
-
-  res.json(context.store.walletTransactions.slice().reverse());
 });
 
-app.get("/api/admin/tickets", (req, res) => {
-  const context = requireAdminContext(req, res);
-  if (!context) {
-    return;
-  }
+app.post("/api/auth/request-code", async (req, res) => {
+  try {
+    const phoneNumber = normalizePhoneNumber(req.body.phoneNumber);
+    if (!phoneNumber) {
+      res.status(400).json({ message: "Phone number is required" });
+      return;
+    }
 
-  res.json(
-    context.store.tickets
-      .slice()
-      .reverse()
-      .map((item) => withTicketRelations(context.store, item)),
-  );
+    const result = await transaction(async (client) => {
+      const settings = await getAppSettings(client);
+      await ensureUser(client, phoneNumber, {
+        fullName: req.body.fullName,
+        cityName: req.body.cityName,
+        telegramChatId: req.body.telegramChatId,
+      });
+
+      const code = createLoginCode();
+      const delivery = await sendTelegramCode(
+        client,
+        settings,
+        phoneNumber,
+        code,
+        req.body.telegramChatId,
+      );
+
+      await client.query(
+        "UPDATE auth_codes SET status = 'expired' WHERE phone_number = $1 AND status = 'pending'",
+        [phoneNumber],
+      );
+      await storeTelegramDelivery(client, delivery);
+      await client.query(
+        `
+        INSERT INTO auth_codes (
+          id,
+          phone_number,
+          code,
+          status,
+          attempts,
+          created_at,
+          expires_at,
+          delivery_id,
+          support_telegram
+        ) VALUES ($1, $2, $3, 'pending', 0, $4, $5, $6, $7)
+        `,
+        [
+          id("auth"),
+          phoneNumber,
+          code,
+          nowIso(),
+          futureIso(AUTH_CODE_TTL_MS),
+          delivery.id,
+          settings.accessRequestTelegram,
+        ],
+      );
+
+      return {
+        ok: true,
+        phoneNumber,
+        expiresAt: futureIso(AUTH_CODE_TTL_MS),
+        delivery: {
+          status: delivery.status,
+          chatId: delivery.chatId || undefined,
+        },
+        debugCode: IS_PROD ? undefined : code,
+        supportTelegram: settings.accessRequestTelegram,
+      };
+    });
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      message: error instanceof Error ? error.message : "Failed to request code",
+    });
+  }
 });
 
-app.get("/api/admin/auth-codes", (req, res) => {
-  const context = requireAdminContext(req, res);
-  if (!context) {
-    return;
-  }
+app.post("/api/auth/verify-code", async (req, res) => {
+  try {
+    const phoneNumber = normalizePhoneNumber(req.body.phoneNumber);
+    const code = `${req.body.code || ""}`.trim();
+    if (!phoneNumber || !code) {
+      res.status(400).json({ message: "Phone number and code are required" });
+      return;
+    }
 
-  res.json(context.store.authCodes.slice().reverse());
+    const payload = await transaction(async (client) => {
+      const currentTimestamp = nowIso();
+      const authCode = await maybeOne(
+        `
+        SELECT *
+        FROM auth_codes
+        WHERE phone_number = $1
+          AND code = $2
+          AND status = 'pending'
+          AND expires_at > $3
+        ORDER BY created_at DESC
+        LIMIT 1
+        `,
+        [phoneNumber, code, currentTimestamp],
+        client,
+      );
+
+      if (!authCode) {
+        throw new Error("Invalid or expired code");
+      }
+
+      await client.query("UPDATE auth_codes SET status = 'used' WHERE id = $1", [authCode.id]);
+
+      const user = await ensureUser(client, phoneNumber, {
+        cityName: req.body.cityName,
+        fullName: req.body.fullName,
+      });
+      const session = await issueSession(client, user.id);
+      const settings = await getAppSettings(client);
+      const wallet = await loadWallet(client, user.id);
+
+      return {
+        token: session.token,
+        user: serializeUser(user),
+        wallet,
+        config: serializePublicConfig(settings),
+      };
+    });
+
+    res.json(payload);
+  } catch (error) {
+    res.status(400).json({
+      message: error instanceof Error ? error.message : "Failed to verify code",
+    });
+  }
 });
 
-app.get("/api/admin/deliveries", (req, res) => {
-  const context = requireAdminContext(req, res);
-  if (!context) {
+app.get("/api/auth/debug-last-code", async (req, res) => {
+  if (IS_PROD) {
+    res.status(404).json({ message: "Not available" });
     return;
   }
 
-  res.json(context.store.telegramDeliveries.slice().reverse());
+  try {
+    const phoneNumber = normalizePhoneNumber(req.query.phone);
+    const latest = await withClient((client) =>
+      maybeOne(
+        `
+        SELECT * FROM auth_codes
+        WHERE phone_number = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+        `,
+        [phoneNumber],
+        client,
+      ),
+    );
+
+    res.json({
+      phoneNumber,
+      code: latest?.code || null,
+      status: latest?.status || null,
+      expiresAt: latest?.expires_at || null,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Debug failed" });
+  }
 });
 
-app.get("/api/admin/support", (req, res) => {
-  const context = requireAdminContext(req, res);
-  if (!context) {
-    return;
-  }
+app.get("/api/auth/me", async (req, res) => {
+  try {
+    const result = await withClient(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      const settings = await getAppSettings(client);
+      const wallet = await loadWallet(client, context.user.id);
+      return {
+        token: parseAuthToken(req),
+        user: serializeUser(context.user),
+        wallet,
+        config: serializePublicConfig(settings),
+      };
+    });
 
-  res.json(context.store.supportMessages.slice().reverse());
+    if (result) {
+      res.json(result);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Session failed" });
+  }
 });
 
-app.get("/api/admin/app-settings", (req, res) => {
-  const context = requireAdminContext(req, res);
-  if (!context) {
-    return;
+app.post("/api/auth/logout", async (req, res) => {
+  try {
+    const token = parseAuthToken(req);
+    if (token) {
+      await query("DELETE FROM sessions WHERE token = $1", [token]);
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Logout failed" });
   }
-
-  res.json(context.store.appSettings);
 });
 
-app.patch("/api/admin/app-settings", (req, res) => {
-  const context = requireAdminContext(req, res);
-  if (!context) {
-    return;
+app.get("/api/me", async (req, res) => {
+  try {
+    const user = await withClient(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      return context ? serializeUser(context.user) : null;
+    });
+    if (user) {
+      res.json(user);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Profile failed" });
   }
+});
 
-  context.store.appSettings = {
-    ...context.store.appSettings,
-    ...(req.body || {}),
-  };
-  writeStore(context.store);
-  res.json(context.store.appSettings);
+app.patch("/api/me", async (req, res) => {
+  try {
+    const payload = await transaction(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+
+      const user = await ensureUser(client, context.user.phone_number, {
+        fullName: req.body.fullName,
+        cityName: req.body.cityName,
+        telegramChatId: req.body.telegramChatId,
+      });
+
+      return serializeUser(user);
+    });
+
+    if (payload) {
+      res.json(payload);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Update failed" });
+  }
+});
+
+app.get("/api/settings", async (req, res) => {
+  try {
+    const payload = await withClient(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      const settings = await getAppSettings(client);
+      return {
+        ...serializeUser(context.user).settings,
+        cityName: context.user.city_name,
+        supportPhone: settings.supportPhone,
+        supportTelegram: settings.supportTelegram,
+        accessRequestTelegram: settings.accessRequestTelegram,
+        rideAccessEnabled: Boolean(context.user.ride_access_enabled),
+        trialRidesRemaining: Number(context.user.trial_rides_remaining || 0),
+        accessRequestedAt: context.user.access_requested_at,
+      };
+    });
+
+    if (payload) {
+      res.json(payload);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Settings failed" });
+  }
+});
+
+app.patch("/api/settings", async (req, res) => {
+  try {
+    const payload = await transaction(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+
+      const user = context.user;
+      const language =
+        typeof req.body.language === "string" && req.body.language.trim()
+          ? req.body.language.trim()
+          : user.settings_language;
+      const notificationsEnabled =
+        typeof req.body.notificationsEnabled === "boolean"
+          ? req.body.notificationsEnabled
+          : user.settings_notifications_enabled;
+      const appTheme =
+        typeof req.body.appTheme === "string" && req.body.appTheme.trim()
+          ? req.body.appTheme.trim()
+          : user.settings_app_theme;
+      const cityName =
+        typeof req.body.cityName === "string" ? req.body.cityName.trim() : user.city_name;
+
+      await client.query(
+        `
+        UPDATE users
+        SET settings_language = $2,
+            settings_notifications_enabled = $3,
+            settings_app_theme = $4,
+            city_name = $5,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [user.id, language, notificationsEnabled, appTheme, cityName],
+      );
+
+      const nextUser = await maybeOne("SELECT * FROM users WHERE id = $1", [user.id], client);
+      const settings = await getAppSettings(client);
+
+      return {
+        ...serializeUser(nextUser).settings,
+        cityName: nextUser.city_name,
+        supportPhone: settings.supportPhone,
+        supportTelegram: settings.supportTelegram,
+        accessRequestTelegram: settings.accessRequestTelegram,
+        rideAccessEnabled: Boolean(nextUser.ride_access_enabled),
+        trialRidesRemaining: Number(nextUser.trial_rides_remaining || 0),
+        accessRequestedAt: nextUser.access_requested_at,
+      };
+    });
+
+    if (payload) {
+      res.json(payload);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Settings update failed" });
+  }
+});
+
+app.post("/api/access/request", async (req, res) => {
+  try {
+    const result = await transaction(async (client) => {
+      const context = await getSessionContext(req, client);
+      const user =
+        context?.user ||
+        (req.body.phoneNumber
+          ? await ensureUser(client, normalizePhoneNumber(req.body.phoneNumber), {
+              cityName: req.body.cityName,
+            })
+          : null);
+
+      if (!user) {
+        throw new Error("Authentication or phone number is required");
+      }
+
+      const settings = await getAppSettings(client);
+      await client.query(
+        `
+        UPDATE users
+        SET access_requested_at = CURRENT_TIMESTAMP,
+            access_note = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [user.id, `Write to ${settings.accessRequestTelegram} to enable bus payments.`],
+      );
+      await client.query(
+        `
+        INSERT INTO support_messages (
+          id,
+          user_id,
+          phone_number,
+          subject,
+          message,
+          status,
+          kind,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, 'new', 'access', CURRENT_TIMESTAMP)
+        `,
+        [
+          id("support"),
+          user.id,
+          user.phone_number,
+          "Ride access request",
+          `User requested ride access. Telegram: ${settings.accessRequestTelegram}`,
+        ],
+      );
+      await createNotification(
+        client,
+        user.id,
+        "Запрос доступа отправлен",
+        `Для активации напишите в Telegram ${settings.accessRequestTelegram}.`,
+        "access",
+      );
+
+      return {
+        ok: true,
+        telegramUsername: settings.accessRequestTelegram,
+        message: `Write to ${settings.accessRequestTelegram} for access activation`,
+      };
+    });
+
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ message: error instanceof Error ? error.message : "Access request failed" });
+  }
+});
+
+app.get("/api/wallet", async (req, res) => {
+  try {
+    const wallet = await withClient(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      return context ? loadWallet(client, context.user.id) : null;
+    });
+    if (wallet) {
+      res.json(wallet);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Wallet failed" });
+  }
+});
+
+app.get("/api/wallet/cards", async (req, res) => {
+  try {
+    const cards = await withClient(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      const wallet = await loadWallet(client, context.user.id);
+      return wallet.cards;
+    });
+
+    if (cards) {
+      res.json(cards);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Cards failed" });
+  }
+});
+
+app.post("/api/wallet/cards", async (req, res) => {
+  try {
+    const card = await transaction(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+
+      const holderName = `${req.body.holderName || ""}`.trim();
+      const number = normalizeCardNumber(req.body.number);
+      const cardType = req.body.cardType === "transport" ? "transport" : "bank";
+      const minLength = cardType === "transport" ? 6 : 12;
+
+      if (!holderName || number.length < minLength) {
+        throw new Error("Card payload is invalid");
+      }
+
+      const nextId = id(cardType === "transport" ? "transport-card" : "bank-card");
+      if (cardType === "transport") {
+        await client.query(
+          `
+          INSERT INTO transport_cards (
+            id,
+            user_id,
+            holder_name,
+            number,
+            balance,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          `,
+          [nextId, context.user.id, holderName, number],
+        );
+      } else {
+        await client.query(
+          `
+          INSERT INTO bank_cards (
+            id,
+            user_id,
+            holder_name,
+            number,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          `,
+          [nextId, context.user.id, holderName, number],
+        );
+      }
+
+      await client.query(
+        `
+        UPDATE wallets
+        SET active_card_id = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+        `,
+        [context.user.id, nextId],
+      );
+
+      const wallet = await loadWallet(client, context.user.id);
+      return wallet.cards.find((item) => item.id === nextId) || null;
+    });
+
+    if (card) {
+      res.status(201).json(card);
+    }
+  } catch (error) {
+    res.status(400).json({ message: error instanceof Error ? error.message : "Card create failed" });
+  }
+});
+
+app.patch("/api/wallet/cards/:cardId", async (req, res) => {
+  try {
+    const updated = await transaction(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+
+      const bankCard = await maybeOne(
+        "SELECT * FROM bank_cards WHERE id = $1 AND user_id = $2",
+        [req.params.cardId, context.user.id],
+        client,
+      );
+      const transportCard = bankCard
+        ? null
+        : await maybeOne(
+            "SELECT * FROM transport_cards WHERE id = $1 AND user_id = $2",
+            [req.params.cardId, context.user.id],
+            client,
+          );
+
+      const current = bankCard || transportCard;
+      if (!current) {
+        throw new Error("Card not found");
+      }
+
+      const nextHolderName =
+        typeof req.body.holderName === "string" && req.body.holderName.trim()
+          ? req.body.holderName.trim()
+          : current.holder_name;
+      const nextNumber =
+        typeof req.body.number === "string" && req.body.number.trim()
+          ? normalizeCardNumber(req.body.number)
+          : current.number;
+
+      if (bankCard) {
+        await client.query(
+          `
+          UPDATE bank_cards
+          SET holder_name = $2,
+              number = $3,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+          `,
+          [bankCard.id, nextHolderName, nextNumber],
+        );
+      } else {
+        await client.query(
+          `
+          UPDATE transport_cards
+          SET holder_name = $2,
+              number = $3,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+          `,
+          [transportCard.id, nextHolderName, nextNumber],
+        );
+      }
+
+      const wallet = await loadWallet(client, context.user.id);
+      return wallet.cards.find((item) => item.id === req.params.cardId) || null;
+    });
+
+    if (updated) {
+      res.json(updated);
+    }
+  } catch (error) {
+    res.status(404).json({ message: error instanceof Error ? error.message : "Card update failed" });
+  }
+});
+
+app.delete("/api/wallet/cards/:cardId", async (req, res) => {
+  try {
+    const payload = await transaction(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+
+      await client.query("DELETE FROM bank_cards WHERE id = $1 AND user_id = $2", [req.params.cardId, context.user.id]);
+      await client.query("DELETE FROM transport_cards WHERE id = $1 AND user_id = $2", [req.params.cardId, context.user.id]);
+
+      const walletRow = await maybeOne("SELECT * FROM wallets WHERE user_id = $1", [context.user.id], client);
+      let activeCardId = walletRow?.active_card_id || null;
+      if (activeCardId === req.params.cardId) {
+        const wallet = await loadWallet(client, context.user.id);
+        activeCardId = wallet.cards[0]?.id || null;
+        await client.query(
+          `
+          UPDATE wallets
+          SET active_card_id = $2,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = $1
+          `,
+          [context.user.id, activeCardId],
+        );
+      }
+
+      return { ok: true, activeCardId };
+    });
+
+    if (payload) {
+      res.json(payload);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Card delete failed" });
+  }
+});
+
+app.post("/api/wallet/cards/:cardId/activate", async (req, res) => {
+  try {
+    const payload = await transaction(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+
+      const exists = await maybeOne(
+        `
+        SELECT id
+        FROM (
+          SELECT id FROM bank_cards WHERE user_id = $2
+          UNION ALL
+          SELECT id FROM transport_cards WHERE user_id = $2
+        ) cards
+        WHERE id = $1
+        `,
+        [req.params.cardId, context.user.id],
+        client,
+      );
+
+      if (!exists) {
+        throw new Error("Card not found");
+      }
+
+      await client.query(
+        `
+        UPDATE wallets
+        SET active_card_id = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+        `,
+        [context.user.id, req.params.cardId],
+      );
+
+      return { ok: true, activeCardId: req.params.cardId };
+    });
+
+    if (payload) {
+      res.json(payload);
+    }
+  } catch (error) {
+    res.status(404).json({ message: error instanceof Error ? error.message : "Card activate failed" });
+  }
+});
+
+app.post("/api/wallet/top-up", async (req, res) => {
+  try {
+    const wallet = await transaction(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+
+      const settings = await getAppSettings(client);
+      const amount = parsePositiveAmount(req.body.amount);
+      if (!amount || amount < settings.minimumTopUpAmount) {
+        throw new Error(`Minimum top-up amount is ${settings.minimumTopUpAmount}`);
+      }
+
+      const targetType = req.body.targetType === "transport" ? "transport" : "wallet";
+      const walletRow = await maybeOne("SELECT * FROM wallets WHERE user_id = $1", [context.user.id], client);
+
+      if (targetType === "transport") {
+        const targetCardId = req.body.transportCardId || req.body.cardId || walletRow?.active_card_id;
+        const card = await maybeOne(
+          "SELECT * FROM transport_cards WHERE id = $1 AND user_id = $2",
+          [targetCardId, context.user.id],
+          client,
+        );
+        if (!card) {
+          throw new Error("Transport card not found");
+        }
+
+        const before = toNumber(card.balance);
+        const after = before + amount;
+        await client.query(
+          `
+          UPDATE transport_cards
+          SET balance = $2,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+          `,
+          [card.id, after],
+        );
+        await createWalletTransaction(client, context.user.id, {
+          type: "transport-topup",
+          source: "transport-card",
+          description: `Transport card top-up ${card.number}`,
+          amount,
+          balanceBefore: before,
+          balanceAfter: after,
+          meta: {
+            cardId: card.id,
+            targetType: "transport",
+          },
+        });
+      } else {
+        const before = toNumber(walletRow?.balance);
+        const after = before + amount;
+        await client.query(
+          `
+          UPDATE wallets
+          SET balance = $2,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = $1
+          `,
+          [context.user.id, after],
+        );
+        await createWalletTransaction(client, context.user.id, {
+          type: "topup",
+          source: req.body.source || "manual",
+          description: req.body.description || "Wallet top-up",
+          amount,
+          balanceBefore: before,
+          balanceAfter: after,
+          meta: {
+            cardId: req.body.cardId || walletRow?.active_card_id || null,
+            targetType: "wallet",
+          },
+        });
+      }
+
+      return loadWallet(client, context.user.id);
+    });
+
+    if (wallet) {
+      res.json(wallet);
+    }
+  } catch (error) {
+    res.status(400).json({ message: error instanceof Error ? error.message : "Top-up failed" });
+  }
+});
+
+app.get("/api/wallet/transactions", async (req, res) => {
+  try {
+    const transactions = await withClient(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      const wallet = await loadWallet(client, context.user.id);
+      return wallet.transactions;
+    });
+
+    if (transactions) {
+      res.json(transactions);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Transactions failed" });
+  }
+});
+
+app.get("/api/cities", async (_req, res) => {
+  try {
+    const rows = await query("SELECT id, name FROM cities ORDER BY name ASC");
+    res.json(rows.rows.map((item) => ({ id: item.id, name: item.name })));
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Cities failed" });
+  }
+});
+
+app.post("/api/cities", async (req, res) => {
+  try {
+    const name = `${req.body.name || ""}`.trim();
+    if (!name) {
+      res.status(400).json({ message: "City name is required" });
+      return;
+    }
+    const city = await transaction(async (client) => {
+      const nextId = req.body.id || id("city");
+      await client.query("INSERT INTO cities (id, name) VALUES ($1, $2)", [nextId, name]);
+      return { id: nextId, name };
+    });
+    res.status(201).json(city);
+  } catch (error) {
+    res.status(400).json({ message: error instanceof Error ? error.message : "City create failed" });
+  }
+});
+
+app.patch("/api/cities/:cityId", async (req, res) => {
+  try {
+    const name = `${req.body.name || ""}`.trim();
+    if (!name) {
+      res.status(400).json({ message: "City name is required" });
+      return;
+    }
+    const city = await transaction(async (client) => {
+      const current = await getCity(client, req.params.cityId);
+      if (!current) {
+        throw new Error("City not found");
+      }
+      await client.query("UPDATE cities SET name = $2 WHERE id = $1", [req.params.cityId, name]);
+      return { id: req.params.cityId, name };
+    });
+    res.json(city);
+  } catch (error) {
+    res.status(404).json({ message: error instanceof Error ? error.message : "City update failed" });
+  }
+});
+
+app.delete("/api/cities/:cityId", async (req, res) => {
+  try {
+    await query("DELETE FROM cities WHERE id = $1", [req.params.cityId]);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "City delete failed" });
+  }
+});
+
+app.get("/api/tariffs", async (req, res) => {
+  try {
+    const params = [];
+    let whereClause = "";
+    if (`${req.query.cityId || ""}`.trim()) {
+      params.push(`${req.query.cityId}`.trim());
+      whereClause = `WHERE city_id = $${params.length}`;
+    }
+    const rows = await many(
+      `SELECT * FROM tariffs ${whereClause} ORDER BY name ASC`,
+      params,
+    );
+    res.json(
+      rows.map((item) => ({
+        id: item.id,
+        cityId: item.city_id,
+        name: item.name,
+        price: toNumber(item.price),
+      })),
+    );
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Tariffs failed" });
+  }
+});
+
+app.post("/api/tariffs", async (req, res) => {
+  try {
+    const tariff = await transaction(async (client) => {
+      const city = await getCity(client, req.body.cityId);
+      if (!city) {
+        throw new Error("City not found");
+      }
+      const nextId = req.body.id || id("tariff");
+      const name = `${req.body.name || ""}`.trim();
+      const price = parsePositiveAmount(req.body.price);
+      if (!name || !price) {
+        throw new Error("Tariff payload is invalid");
+      }
+      await client.query(
+        "INSERT INTO tariffs (id, city_id, name, price) VALUES ($1, $2, $3, $4)",
+        [nextId, req.body.cityId, name, price],
+      );
+      return { id: nextId, cityId: req.body.cityId, name, price };
+    });
+    res.status(201).json(tariff);
+  } catch (error) {
+    res.status(400).json({ message: error instanceof Error ? error.message : "Tariff create failed" });
+  }
+});
+
+app.patch("/api/tariffs/:tariffId", async (req, res) => {
+  try {
+    const tariff = await transaction(async (client) => {
+      const current = await getTariff(client, req.params.tariffId);
+      if (!current) {
+        throw new Error("Tariff not found");
+      }
+      const cityId =
+        typeof req.body.cityId === "string" && (await getCity(client, req.body.cityId))
+          ? req.body.cityId
+          : current.city_id;
+      const name =
+        typeof req.body.name === "string" && req.body.name.trim()
+          ? req.body.name.trim()
+          : current.name;
+      const price =
+        req.body.price !== undefined ? parsePositiveAmount(req.body.price) : toNumber(current.price);
+      if (!price) {
+        throw new Error("Tariff price is invalid");
+      }
+      await client.query(
+        `
+        UPDATE tariffs
+        SET city_id = $2,
+            name = $3,
+            price = $4,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [req.params.tariffId, cityId, name, price],
+      );
+      return { id: req.params.tariffId, cityId, name, price };
+    });
+    res.json(tariff);
+  } catch (error) {
+    res.status(404).json({ message: error instanceof Error ? error.message : "Tariff update failed" });
+  }
+});
+
+app.delete("/api/tariffs/:tariffId", async (req, res) => {
+  try {
+    await query("DELETE FROM tariffs WHERE id = $1", [req.params.tariffId]);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Tariff delete failed" });
+  }
+});
+
+app.get("/api/buses", async (req, res) => {
+  try {
+    const buses = await withClient((client) =>
+      fetchBuses(client, {
+        cityId: `${req.query.cityId || ""}`.trim(),
+        number: `${req.query.number || ""}`.trim(),
+        qrToken: `${req.query.qrToken || ""}`.trim(),
+        bluetoothOnly: req.query.bluetooth === "true",
+      }),
+    );
+    res.json(buses);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Buses failed" });
+  }
+});
+
+app.post("/api/buses", async (req, res) => {
+  try {
+    const bus = await transaction(async (client) => {
+      const city = await getCity(client, req.body.cityId);
+      const tariff = await getTariff(client, req.body.tariffId);
+      if (!city || !tariff) {
+        throw new Error("City or tariff not found");
+      }
+
+      const nextBus = {
+        id: req.body.id || id("bus"),
+        cityId: req.body.cityId,
+        number: normalizeTransportValue(req.body.number),
+        routeNumber: `${req.body.routeNumber || ""}`.trim() || "№ 1",
+        tariffId: req.body.tariffId,
+        bluetoothEnabled: toBool(req.body.bluetoothEnabled, true),
+        validatorName: normalizeTransportValue(req.body.validatorName || req.body.number),
+        qrToken: `${req.body.qrToken || `qr-${Date.now()}`}`.trim(),
+      };
+
+      if (!nextBus.number) {
+        throw new Error("Bus number is required");
+      }
+
+      await client.query(
+        `
+        INSERT INTO buses (
+          id,
+          city_id,
+          number,
+          route_number,
+          tariff_id,
+          bluetooth_enabled,
+          validator_name,
+          qr_token,
+          created_at,
+          updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `,
+        [
+          nextBus.id,
+          nextBus.cityId,
+          nextBus.number,
+          nextBus.routeNumber,
+          nextBus.tariffId,
+          nextBus.bluetoothEnabled,
+          nextBus.validatorName,
+          nextBus.qrToken,
+        ],
+      );
+
+      return (await fetchBuses(client, { cityId: nextBus.cityId, number: nextBus.number }))
+        .find((item) => item.id === nextBus.id);
+    });
+
+    res.status(201).json(bus);
+  } catch (error) {
+    res.status(400).json({ message: error instanceof Error ? error.message : "Bus create failed" });
+  }
+});
+
+app.patch("/api/buses/:busId", async (req, res) => {
+  try {
+    const bus = await transaction(async (client) => {
+      const current = await getBus(client, req.params.busId);
+      if (!current) {
+        throw new Error("Bus not found");
+      }
+
+      const cityId =
+        typeof req.body.cityId === "string" && (await getCity(client, req.body.cityId))
+          ? req.body.cityId
+          : current.city_id;
+      const tariffId =
+        typeof req.body.tariffId === "string" && (await getTariff(client, req.body.tariffId))
+          ? req.body.tariffId
+          : current.tariff_id;
+
+      const nextNumber =
+        typeof req.body.number === "string" && req.body.number.trim()
+          ? normalizeTransportValue(req.body.number)
+          : current.number;
+      const nextRouteNumber =
+        typeof req.body.routeNumber === "string" && req.body.routeNumber.trim()
+          ? req.body.routeNumber.trim()
+          : current.route_number;
+      const nextValidatorName =
+        typeof req.body.validatorName === "string" && req.body.validatorName.trim()
+          ? normalizeTransportValue(req.body.validatorName)
+          : current.validator_name;
+      const nextQrToken =
+        typeof req.body.qrToken === "string" && req.body.qrToken.trim()
+          ? req.body.qrToken.trim()
+          : current.qr_token;
+
+      await client.query(
+        `
+        UPDATE buses
+        SET city_id = $2,
+            number = $3,
+            route_number = $4,
+            tariff_id = $5,
+            bluetooth_enabled = $6,
+            validator_name = $7,
+            qr_token = $8,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [
+          req.params.busId,
+          cityId,
+          nextNumber,
+          nextRouteNumber,
+          tariffId,
+          req.body.bluetoothEnabled !== undefined
+            ? toBool(req.body.bluetoothEnabled, current.bluetooth_enabled)
+            : current.bluetooth_enabled,
+          nextValidatorName,
+          nextQrToken,
+        ],
+      );
+
+      return (await fetchBuses(client, { cityId, number: nextNumber }))
+        .find((item) => item.id === req.params.busId);
+    });
+
+    res.json(bus);
+  } catch (error) {
+    res.status(404).json({ message: error instanceof Error ? error.message : "Bus update failed" });
+  }
+});
+
+app.delete("/api/buses/:busId", async (req, res) => {
+  try {
+    await query("DELETE FROM buses WHERE id = $1", [req.params.busId]);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Bus delete failed" });
+  }
+});
+
+app.get("/api/tickets", async (req, res) => {
+  try {
+    const tickets = await withClient(async (client) => {
+      const auth = await getSessionContext(req, client);
+      const phoneNumber = normalizePhoneNumber(req.query.phone);
+      if (auth) {
+        return fetchTicketsForUser(client, { userId: auth.user.id });
+      }
+      if (phoneNumber) {
+        return fetchTicketsForUser(client, { phoneNumber });
+      }
+      return fetchTicketsForUser(client);
+    });
+    res.json(tickets);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Tickets failed" });
+  }
+});
+
+app.post("/api/tickets", async (req, res) => {
+  try {
+    const ticket = await transaction(async (client) => {
+      const auth = await getSessionContext(req, client);
+      const user =
+        auth?.user ||
+        (req.body.phoneNumber
+          ? await ensureUser(client, normalizePhoneNumber(req.body.phoneNumber), {
+              cityName: req.body.cityName,
+            })
+          : null);
+
+      if (!user) {
+        throw new Error("Authentication or phone number is required");
+      }
+
+      const bus = await getBus(client, req.body.busId);
+      if (!bus) {
+        throw new Error("Bus not found");
+      }
+
+      const relatedBus = (await fetchBuses(client, { cityId: bus.city_id, number: bus.number }))
+        .find((item) => item.id === bus.id);
+      const settings = await getAppSettings(client);
+      const requestedCity =
+        (await getCity(client, `${req.body.cityId || ""}`.trim())) ||
+        (await getCityByName(client, req.body.cityName)) ||
+        (await getCityByName(client, user.city_name)) ||
+        (await getCity(client, bus.city_id));
+      const wallet = await maybeOne("SELECT * FROM wallets WHERE user_id = $1", [user.id], client);
+      const amount = toNumber(relatedBus?.price);
+      let paymentMethod = `${req.body.paymentMethod || "wallet"}`.trim();
+      let accessMode = "granted";
+
+      if (!user.ride_access_enabled) {
+        if (Number(user.trial_rides_remaining || 0) > 0) {
+          await client.query(
+            `
+            UPDATE users
+            SET trial_rides_remaining = trial_rides_remaining - 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+            `,
+            [user.id],
+          );
+          paymentMethod = "trial";
+          accessMode = "trial";
+        } else {
+          const supportHandle = settings.accessRequestTelegram;
+          throw Object.assign(new Error(`Ride access is locked. Write to ${supportHandle} for activation.`), {
+            statusCode: 403,
+            errorCode: "ACCESS_REQUIRED",
+            supportTelegram: supportHandle,
+          });
+        }
+      } else if (paymentMethod === "transport-card") {
+        const targetCardId = req.body.cardId || wallet?.active_card_id;
+        const transportCard = await maybeOne(
+          "SELECT * FROM transport_cards WHERE id = $1 AND user_id = $2",
+          [targetCardId, user.id],
+          client,
+        );
+        if (!transportCard) {
+          throw new Error("Active transport card not found");
+        }
+        const before = toNumber(transportCard.balance);
+        if (before < amount) {
+          throw new Error("Insufficient transport card balance");
+        }
+        const after = before - amount;
+        await client.query(
+          `
+          UPDATE transport_cards
+          SET balance = $2,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+          `,
+          [transportCard.id, after],
+        );
+        await createWalletTransaction(client, user.id, {
+          type: "ride",
+          source: "transport-card",
+          description: `Ride payment for ${relatedBus.number}`,
+          amount: -amount,
+          balanceBefore: before,
+          balanceAfter: after,
+          meta: {
+            cardId: transportCard.id,
+            busId: bus.id,
+            routeNumber: relatedBus.routeNumber,
+          },
+        });
+        accessMode = "transport-card";
+      } else if (paymentMethod === "wallet") {
+        const before = toNumber(wallet?.balance);
+        if (before < amount) {
+          throw new Error("Insufficient wallet balance");
+        }
+        const after = before - amount;
+        await client.query(
+          `
+          UPDATE wallets
+          SET balance = $2,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = $1
+          `,
+          [user.id, after],
+        );
+        await createWalletTransaction(client, user.id, {
+          type: "ride",
+          source: "wallet",
+          description: `Ride payment for ${relatedBus.number}`,
+          amount: -amount,
+          balanceBefore: before,
+          balanceAfter: after,
+          meta: {
+            busId: bus.id,
+            routeNumber: relatedBus.routeNumber,
+          },
+        });
+        accessMode = "wallet";
+      }
+
+      const nextTicket = {
+        id: id("ticket"),
+        userId: user.id,
+        phoneNumber: user.phone_number,
+        cityId: requestedCity?.id || bus.city_id,
+        cityName: requestedCity?.name || user.city_name || relatedBus.cityName,
+        busId: bus.id,
+        busNumber: relatedBus.number,
+        routeNumber: relatedBus.routeNumber,
+        tariffName: relatedBus.tariffName,
+        amount,
+        paymentMethod,
+        accessMode,
+        qrValue: `${relatedBus.qrToken}:${Date.now()}`,
+        paidAt: nowIso(),
+        validUntil: futureIso(RIDE_TICKET_TTL_MS),
+        status: "active",
+      };
+
+      await client.query(
+        `
+        INSERT INTO tickets (
+          id,
+          user_id,
+          phone_number,
+          city_id,
+          city_name,
+          bus_id,
+          bus_number,
+          route_number,
+          tariff_name,
+          amount,
+          payment_method,
+          access_mode,
+          qr_value,
+          paid_at,
+          valid_until,
+          status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        `,
+        [
+          nextTicket.id,
+          nextTicket.userId,
+          nextTicket.phoneNumber,
+          nextTicket.cityId,
+          nextTicket.cityName,
+          nextTicket.busId,
+          nextTicket.busNumber,
+          nextTicket.routeNumber,
+          nextTicket.tariffName,
+          nextTicket.amount,
+          nextTicket.paymentMethod,
+          nextTicket.accessMode,
+          nextTicket.qrValue,
+          nextTicket.paidAt,
+          nextTicket.validUntil,
+          nextTicket.status,
+        ],
+      );
+      await createNotification(
+        client,
+        user.id,
+        "Оплата проезда",
+        `${relatedBus.routeNumber} • ${amount} ${settings.currencySymbol}`,
+        "ticket",
+      );
+
+      return serializeTicketRow({
+        id: nextTicket.id,
+        phone_number: nextTicket.phoneNumber,
+        city_id: nextTicket.cityId,
+        city_name: nextTicket.cityName,
+        bus_id: nextTicket.busId,
+        bus_number: nextTicket.busNumber,
+        route_number: nextTicket.routeNumber,
+        tariff_name: nextTicket.tariffName,
+        amount: nextTicket.amount,
+        payment_method: nextTicket.paymentMethod,
+        access_mode: nextTicket.accessMode,
+        qr_value: nextTicket.qrValue,
+        paid_at: nextTicket.paidAt,
+        valid_until: nextTicket.validUntil,
+        status: nextTicket.status,
+      });
+    });
+
+    res.status(201).json(ticket);
+  } catch (error) {
+    const statusCode = error && typeof error === "object" && "statusCode" in error
+      ? error.statusCode
+      : 400;
+    const payload = {
+      message: error instanceof Error ? error.message : "Ticket create failed",
+    };
+    if (error && typeof error === "object" && "errorCode" in error) {
+      payload.code = error.errorCode;
+      payload.supportTelegram = error.supportTelegram;
+    }
+    res.status(statusCode).json(payload);
+  }
+});
+
+app.post("/api/support", async (req, res) => {
+  try {
+    const payload = await transaction(async (client) => {
+      const user = await findUserFromRequest(client, req);
+      const message = `${req.body.message || ""}`.trim();
+      if (!message) {
+        throw new Error("Message is required");
+      }
+
+      const entry = {
+        id: id("support"),
+        userId: user?.id || null,
+        phoneNumber: user?.phone_number || normalizePhoneNumber(req.body.phoneNumber),
+        subject: `${req.body.subject || "Support request"}`.trim(),
+        message,
+        status: "new",
+        kind: `${req.body.kind || "support"}`.trim(),
+        createdAt: nowIso(),
+      };
+
+      await client.query(
+        `
+        INSERT INTO support_messages (
+          id,
+          user_id,
+          phone_number,
+          subject,
+          message,
+          status,
+          kind,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `,
+        [
+          entry.id,
+          entry.userId,
+          entry.phoneNumber,
+          entry.subject,
+          entry.message,
+          entry.status,
+          entry.kind,
+          entry.createdAt,
+        ],
+      );
+
+      if (user) {
+        await createNotification(client, user.id, "Support request", "Support request created.", "support");
+      }
+
+      return entry;
+    });
+
+    res.status(201).json(payload);
+  } catch (error) {
+    res.status(400).json({ message: error instanceof Error ? error.message : "Support failed" });
+  }
+});
+
+app.get("/api/notifications", async (req, res) => {
+  try {
+    const notifications = await withClient(async (client) => {
+      const user = await findUserFromRequest(client, req);
+      if (!user) {
+        return [];
+      }
+
+      const rows = await many(
+        `
+        SELECT *
+        FROM notifications
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        `,
+        [user.id],
+        client,
+      );
+
+      return rows.map((item) => ({
+        id: item.id,
+        title: item.title,
+        body: item.body,
+        type: item.type,
+        read: Boolean(item.is_read),
+        createdAt: item.created_at,
+      }));
+    });
+
+    res.json(notifications);
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Notifications failed" });
+  }
+});
+
+app.patch("/api/notifications/:notificationId/read", async (req, res) => {
+  try {
+    const notification = await transaction(async (client) => {
+      const context = await requireUserContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+
+      const row = await maybeOne(
+        `
+        SELECT *
+        FROM notifications
+        WHERE id = $1
+          AND user_id = $2
+        `,
+        [req.params.notificationId, context.user.id],
+        client,
+      );
+
+      if (!row) {
+        throw new Error("Notification not found");
+      }
+
+      await client.query("UPDATE notifications SET is_read = TRUE WHERE id = $1", [row.id]);
+      return {
+        id: row.id,
+        title: row.title,
+        body: row.body,
+        type: row.type,
+        read: true,
+        createdAt: row.created_at,
+      };
+    });
+
+    if (notification) {
+      res.json(notification);
+    }
+  } catch (error) {
+    res.status(404).json({ message: error instanceof Error ? error.message : "Notification update failed" });
+  }
+});
+
+app.get("/api/admin/summary", async (req, res) => {
+  try {
+    const payload = await withClient(async (client) => {
+      const context = await requireAdminContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      return {
+        ...(await getSummary(client)),
+        admin: {
+          id: context.admin.id,
+          name: context.admin.name,
+        },
+      };
+    });
+    if (payload) {
+      res.json(payload);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Admin summary failed" });
+  }
+});
+
+app.get("/api/admin/users", async (req, res) => {
+  try {
+    const users = await withClient(async (client) => {
+      const context = await requireAdminContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+
+      const rows = await many("SELECT * FROM users ORDER BY created_at DESC", [], client);
+      return Promise.all(
+        rows.map(async (row) => ({
+          ...serializeUser(row),
+          wallet: await loadWallet(client, row.id),
+        })),
+      );
+    });
+
+    if (users) {
+      res.json(users);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Admin users failed" });
+  }
+});
+
+app.patch("/api/admin/users/:userId", async (req, res) => {
+  try {
+    const payload = await transaction(async (client) => {
+      const context = await requireAdminContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+
+      const user = await maybeOne("SELECT * FROM users WHERE id = $1", [req.params.userId], client);
+      if (!user) {
+        throw new Error("User not found");
+      }
+
+      const nextFullName =
+        typeof req.body.fullName === "string" && req.body.fullName.trim()
+          ? req.body.fullName.trim()
+          : user.full_name;
+      const nextCityName =
+        typeof req.body.cityName === "string" ? req.body.cityName.trim() : user.city_name;
+      const nextStatus =
+        typeof req.body.status === "string" && req.body.status.trim()
+          ? req.body.status.trim()
+          : user.status;
+      const nextTelegramChatId =
+        typeof req.body.telegramChatId === "string"
+          ? req.body.telegramChatId.trim()
+          : user.telegram_chat_id;
+      const nextRideAccessEnabled =
+        typeof req.body.rideAccessEnabled === "boolean"
+          ? req.body.rideAccessEnabled
+          : user.ride_access_enabled;
+      const nextTrialRidesRemaining =
+        req.body.trialRidesRemaining !== undefined
+          ? Math.max(0, Number(req.body.trialRidesRemaining || 0))
+          : Number(user.trial_rides_remaining || 0);
+      const nextAccessNote =
+        typeof req.body.accessNote === "string" ? req.body.accessNote.trim() : user.access_note;
+      const nextAccessRequestedAt =
+        nextRideAccessEnabled
+          ? null
+          : req.body.accessRequestedAt === null
+            ? null
+            : user.access_requested_at;
+
+      await client.query(
+        `
+        UPDATE users
+        SET full_name = $2,
+            city_name = $3,
+            status = $4,
+            telegram_chat_id = $5,
+            ride_access_enabled = $6,
+            trial_rides_remaining = $7,
+            access_note = $8,
+            access_requested_at = $9,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [
+          user.id,
+          nextFullName,
+          nextCityName,
+          nextStatus,
+          nextTelegramChatId,
+          nextRideAccessEnabled,
+          nextTrialRidesRemaining,
+          nextAccessNote,
+          nextAccessRequestedAt,
+        ],
+      );
+
+      if (req.body.balance !== undefined) {
+        await client.query(
+          `
+          UPDATE wallets
+          SET balance = $2,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = $1
+          `,
+          [user.id, toNumber(req.body.balance)],
+        );
+      }
+
+      const nextUser = await maybeOne("SELECT * FROM users WHERE id = $1", [user.id], client);
+      return {
+        ...serializeUser(nextUser),
+        wallet: await loadWallet(client, nextUser.id),
+      };
+    });
+
+    if (payload) {
+      res.json(payload);
+    }
+  } catch (error) {
+    res.status(404).json({ message: error instanceof Error ? error.message : "Admin user update failed" });
+  }
+});
+
+app.get("/api/admin/transactions", async (req, res) => {
+  try {
+    const transactions = await withClient(async (client) => {
+      const context = await requireAdminContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      const rows = await many(
+        "SELECT * FROM wallet_transactions ORDER BY created_at DESC",
+        [],
+        client,
+      );
+      return rows.map((item) => ({
+        id: item.id,
+        userId: item.user_id,
+        type: item.type,
+        source: item.source,
+        description: item.description,
+        amount: toNumber(item.amount),
+        balanceBefore: toNumber(item.balance_before),
+        balanceAfter: toNumber(item.balance_after),
+        meta: safeJsonParse(item.meta_json),
+        createdAt: item.created_at,
+      }));
+    });
+
+    if (transactions) {
+      res.json(transactions);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Admin transactions failed" });
+  }
+});
+
+app.get("/api/admin/tickets", async (req, res) => {
+  try {
+    const tickets = await withClient(async (client) => {
+      const context = await requireAdminContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      return fetchTicketsForUser(client);
+    });
+
+    if (tickets) {
+      res.json(tickets);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Admin tickets failed" });
+  }
+});
+
+app.get("/api/admin/auth-codes", async (req, res) => {
+  try {
+    const codes = await withClient(async (client) => {
+      const context = await requireAdminContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      const rows = await many("SELECT * FROM auth_codes ORDER BY created_at DESC", [], client);
+      return rows.map((item) => ({
+        id: item.id,
+        phoneNumber: item.phone_number,
+        code: item.code,
+        status: item.status,
+        attempts: item.attempts,
+        createdAt: item.created_at,
+        expiresAt: item.expires_at,
+        deliveryId: item.delivery_id,
+        supportTelegram: item.support_telegram,
+      }));
+    });
+    if (codes) {
+      res.json(codes);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Admin auth codes failed" });
+  }
+});
+
+app.get("/api/admin/deliveries", async (req, res) => {
+  try {
+    const deliveries = await withClient(async (client) => {
+      const context = await requireAdminContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      const rows = await many("SELECT * FROM telegram_deliveries ORDER BY created_at DESC", [], client);
+      return rows.map((item) => ({
+        id: item.id,
+        phoneNumber: item.phone_number,
+        chatId: item.chat_id,
+        status: item.status,
+        messageText: item.message_text,
+        responseBody: item.response_body,
+        error: item.error,
+        createdAt: item.created_at,
+      }));
+    });
+    if (deliveries) {
+      res.json(deliveries);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Admin deliveries failed" });
+  }
+});
+
+app.get("/api/admin/support", async (req, res) => {
+  try {
+    const items = await withClient(async (client) => {
+      const context = await requireAdminContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      const rows = await many("SELECT * FROM support_messages ORDER BY created_at DESC", [], client);
+      return rows.map((item) => ({
+        id: item.id,
+        userId: item.user_id,
+        phoneNumber: item.phone_number,
+        subject: item.subject,
+        message: item.message,
+        status: item.status,
+        kind: item.kind,
+        createdAt: item.created_at,
+      }));
+    });
+    if (items) {
+      res.json(items);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Admin support failed" });
+  }
+});
+
+app.get("/api/admin/app-settings", async (req, res) => {
+  try {
+    const settings = await withClient(async (client) => {
+      const context = await requireAdminContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      return getAppSettings(client);
+    });
+    if (settings) {
+      res.json(settings);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Admin settings failed" });
+  }
+});
+
+app.patch("/api/admin/app-settings", async (req, res) => {
+  try {
+    const settings = await transaction(async (client) => {
+      const context = await requireAdminContext(req, res, client);
+      if (!context) {
+        return null;
+      }
+      const current = await getAppSettings(client);
+      const next = {
+        appName:
+          typeof req.body.appName === "string" && req.body.appName.trim()
+            ? req.body.appName.trim()
+            : current.appName,
+        supportPhone:
+          typeof req.body.supportPhone === "string" && req.body.supportPhone.trim()
+            ? req.body.supportPhone.trim()
+            : current.supportPhone,
+        supportTelegram:
+          typeof req.body.supportTelegram === "string" && req.body.supportTelegram.trim()
+            ? req.body.supportTelegram.trim()
+            : current.supportTelegram,
+        accessRequestTelegram:
+          typeof req.body.accessRequestTelegram === "string" && req.body.accessRequestTelegram.trim()
+            ? req.body.accessRequestTelegram.trim()
+            : current.accessRequestTelegram,
+        loginDeliveryMode:
+          typeof req.body.loginDeliveryMode === "string" && req.body.loginDeliveryMode.trim()
+            ? req.body.loginDeliveryMode.trim()
+            : current.loginDeliveryMode,
+        defaultLanguage:
+          typeof req.body.defaultLanguage === "string" && req.body.defaultLanguage.trim()
+            ? req.body.defaultLanguage.trim()
+            : current.defaultLanguage,
+        availableLanguages: Array.isArray(req.body.availableLanguages)
+          ? req.body.availableLanguages
+          : current.availableLanguages,
+        shareUrl:
+          typeof req.body.shareUrl === "string" && req.body.shareUrl.trim()
+            ? req.body.shareUrl.trim()
+            : current.shareUrl,
+        currencySymbol:
+          typeof req.body.currencySymbol === "string" && req.body.currencySymbol.trim()
+            ? req.body.currencySymbol.trim()
+            : current.currencySymbol,
+        newUserBonusBalance:
+          req.body.newUserBonusBalance !== undefined
+            ? toNumber(req.body.newUserBonusBalance)
+            : current.newUserBonusBalance,
+        minimumTopUpAmount:
+          req.body.minimumTopUpAmount !== undefined
+            ? toNumber(req.body.minimumTopUpAmount)
+            : current.minimumTopUpAmount,
+        trialRideCount:
+          req.body.trialRideCount !== undefined
+            ? Math.max(0, Number(req.body.trialRideCount || 0))
+            : current.trialRideCount,
+        maintenanceMode:
+          typeof req.body.maintenanceMode === "boolean"
+            ? req.body.maintenanceMode
+            : current.maintenanceMode,
+      };
+
+      await client.query(
+        `
+        UPDATE app_settings
+        SET app_name = $2,
+            support_phone = $3,
+            support_telegram = $4,
+            access_request_telegram = $5,
+            login_delivery_mode = $6,
+            default_language = $7,
+            available_languages_json = $8,
+            share_url = $9,
+            currency_symbol = $10,
+            new_user_bonus_balance = $11,
+            minimum_top_up_amount = $12,
+            trial_ride_count = $13,
+            maintenance_mode = $14,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1
+        `,
+        [
+          1,
+          next.appName,
+          next.supportPhone,
+          next.supportTelegram,
+          next.accessRequestTelegram,
+          next.loginDeliveryMode,
+          next.defaultLanguage,
+          JSON.stringify(next.availableLanguages),
+          next.shareUrl,
+          next.currencySymbol,
+          next.newUserBonusBalance,
+          next.minimumTopUpAmount,
+          next.trialRideCount,
+          next.maintenanceMode,
+        ],
+      );
+
+      return next;
+    });
+
+    if (settings) {
+      res.json(settings);
+    }
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "Admin settings update failed" });
+  }
 });
 
 app.get("*", (req, res) => {
@@ -1482,6 +2688,14 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
 
-app.listen(PORT, () => {
-  console.log(`Avtobys backend listening on http://localhost:${PORT}`);
+async function startServer() {
+  await initDatabase({ adminToken: DEFAULT_ADMIN_TOKEN });
+  app.listen(PORT, () => {
+    console.log(`Avtobys backend listening on http://localhost:${PORT}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error("Failed to start backend", error);
+  process.exit(1);
 });

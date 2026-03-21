@@ -1,12 +1,10 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_overlay_screens.dart';
 import 'data.dart';
 import 'theme.dart';
+import 'transport_api.dart';
 import 'transport_overlays.dart';
 import 'wallet_components.dart';
 import 'wallet_overlays.dart';
@@ -25,40 +23,111 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
   RootTab _selectedTab = RootTab.home;
   RootTab _lastContentTab = RootTab.home;
   bool _isLoading = true;
-  String? _phoneNumber;
+  String? _sessionToken;
+  UserDto? _user;
   String? _selectedCity;
   AppOverlay? _overlay;
   WalletState _walletState = WalletState.empty();
+  List<CityDto> _cities = const [];
+  PublicConfigDto _config = const PublicConfigDto(
+    appName: 'Avtobys',
+    supportPhone: '',
+    supportTelegram: '@aqxrx',
+    accessRequestTelegram: '@aqxrx',
+    loginDeliveryMode: 'telegram',
+    defaultLanguage: 'Русский',
+    shareUrl: '',
+    currencySymbol: '₸',
+    newUserBonusBalance: 0,
+    minimumTopUpAmount: 500,
+    maintenanceMode: false,
+    trialRideCount: 2,
+  );
 
   @override
   void initState() {
     super.initState();
-    _restoreSession();
+    _bootstrap();
   }
 
-  Future<void> _restoreSession() async {
+  String get _phoneNumber => _user?.phoneNumber ?? '';
+
+  String get _currentCity {
+    final fallback = _cities.isNotEmpty
+        ? _cities.first.name
+        : (cityOptions.length > 2 ? cityOptions[2] : 'Актау');
+    return _selectedCity ?? _user?.cityName ?? fallback;
+  }
+
+  Future<void> _bootstrap() async {
     final preferences = await SharedPreferences.getInstance();
-    final phoneNumber = preferences.getString('phone_number');
-    final selectedCity = preferences.getString('selected_city');
-    final walletState = phoneNumber == null || phoneNumber.isEmpty
-        ? WalletState.empty()
-        : await WalletStore.load(phoneNumber);
+    final storedToken = preferences.getString('session_token');
+    final storedCity = preferences.getString('selected_city');
+
+    PublicConfigDto config = _config;
+    List<CityDto> cities = const [];
+    try {
+      config = await TransportApi.getPublicConfig();
+    } catch (_) {}
+    try {
+      cities = await TransportApi.getCities();
+    } catch (_) {}
+
+    AuthSessionDto? session;
+    if (storedToken != null && storedToken.isNotEmpty) {
+      TransportApi.setSessionToken(storedToken);
+      try {
+        session = await TransportApi.getAuthSession();
+      } catch (_) {
+        await preferences.remove('session_token');
+        TransportApi.setSessionToken(null);
+      }
+    }
+
+    final nextCity = _resolveCity(
+      storedCity: storedCity,
+      sessionCity: session?.user.cityName,
+      cities: cities,
+    );
+    if (nextCity != null && nextCity.isNotEmpty) {
+      await preferences.setString('selected_city', nextCity);
+    }
 
     if (!mounted) {
       return;
     }
 
     setState(() {
-      _phoneNumber = phoneNumber;
-      _selectedCity = selectedCity;
-      _walletState = walletState;
-      _overlay = phoneNumber == null || phoneNumber.isEmpty
+      _sessionToken = session?.token;
+      _user = session?.user;
+      _selectedCity = nextCity;
+      _walletState = session?.wallet ?? WalletState.empty();
+      _cities = cities;
+      _config = session?.config ?? config;
+      _overlay = session == null
           ? AppOverlay.login
-          : (selectedCity == null || selectedCity.isEmpty
+          : (nextCity == null || nextCity.isEmpty
                 ? AppOverlay.cityPicker
                 : null);
       _isLoading = false;
     });
+  }
+
+  String? _resolveCity({
+    required String? storedCity,
+    required String? sessionCity,
+    required List<CityDto> cities,
+  }) {
+    final names = cities.map((item) => item.name).toSet();
+    if (storedCity != null && storedCity.isNotEmpty) {
+      if (names.isEmpty || names.contains(storedCity)) {
+        return storedCity;
+      }
+    }
+    if (sessionCity != null && sessionCity.isNotEmpty) {
+      return sessionCity;
+    }
+    return cities.isNotEmpty ? cities.first.name : null;
   }
 
   void _selectTab(RootTab tab) {
@@ -86,19 +155,46 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     });
   }
 
-  Future<void> _savePhoneNumber(String phoneNumber) async {
+  Future<AuthCodeRequestDto> _requestCode(String phoneNumber) {
+    return TransportApi.requestAuthCode(
+      phoneNumber: phoneNumber,
+      cityName: _selectedCity,
+    );
+  }
+
+  Future<void> _verifyCode(String phoneNumber, String code) async {
+    final session = await TransportApi.verifyAuthCode(
+      phoneNumber: phoneNumber,
+      code: code,
+      cityName: _selectedCity,
+    );
+    await _applySession(session);
+  }
+
+  Future<void> _applySession(AuthSessionDto session) async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setString('phone_number', phoneNumber);
-    final walletState = await WalletStore.load(phoneNumber);
+    final nextCity = _resolveCity(
+      storedCity: _selectedCity,
+      sessionCity: session.user.cityName,
+      cities: _cities,
+    );
+    TransportApi.setSessionToken(session.token);
+    await preferences.setString('session_token', session.token);
+    if (nextCity != null && nextCity.isNotEmpty) {
+      await preferences.setString('selected_city', nextCity);
+    }
 
     if (!mounted) {
       return;
     }
 
     setState(() {
-      _phoneNumber = phoneNumber;
-      _walletState = walletState;
-      _overlay = (_selectedCity == null || _selectedCity!.isEmpty)
+      _sessionToken = session.token;
+      _user = session.user;
+      _selectedCity = nextCity;
+      _walletState = session.wallet;
+      _config = session.config;
+      _overlay = nextCity == null || nextCity.isEmpty
           ? AppOverlay.cityPicker
           : null;
     });
@@ -107,11 +203,22 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
   Future<void> _saveCity(String city) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString('selected_city', city);
+    if (_user != null) {
+      final updatedUser = await TransportApi.updateProfile(cityName: city);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectedCity = city;
+        _user = updatedUser;
+        _overlay = null;
+      });
+      return;
+    }
 
     if (!mounted) {
       return;
     }
-
     setState(() {
       _selectedCity = city;
       _overlay = null;
@@ -120,14 +227,18 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
 
   Future<void> _logout() async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.remove('phone_number');
+    try {
+      await TransportApi.logoutAuth();
+    } catch (_) {}
+    await preferences.remove('session_token');
+    TransportApi.setSessionToken(null);
 
     if (!mounted) {
       return;
     }
-
     setState(() {
-      _phoneNumber = null;
+      _sessionToken = null;
+      _user = null;
       _selectedCity = null;
       _walletState = WalletState.empty();
       _overlay = AppOverlay.login;
@@ -136,69 +247,88 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     });
   }
 
-  Future<void> _persistWallet(WalletState walletState) async {
-    final phoneNumber = _phoneNumber;
-    if (phoneNumber == null || phoneNumber.isEmpty) {
+  Future<void> _refreshSession() async {
+    final token = _sessionToken;
+    if (token == null || token.isEmpty) {
       return;
     }
-
-    await WalletStore.save(phoneNumber, walletState);
-
+    TransportApi.setSessionToken(token);
+    final session = await TransportApi.getAuthSession();
     if (!mounted) {
       return;
     }
-
     setState(() {
-      _walletState = walletState;
+      _user = session.user;
+      _walletState = session.wallet;
+      _config = session.config;
+      _selectedCity = _resolveCity(
+        storedCity: _selectedCity,
+        sessionCity: session.user.cityName,
+        cities: _cities,
+      );
     });
   }
 
-  Future<void> _addCard(String holderName, String number) async {
-    final cards = [
-      ..._walletState.cards,
-      WalletCardData(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        holderName: holderName,
-        number: number,
-      ),
-    ];
-
-    final walletState = _walletState.copyWith(
-      cards: cards,
-      activeCardId: cards.last.id,
+  Future<void> _addCard(String holderName, String number, String cardType) async {
+    await TransportApi.addWalletCard(
+      holderName: holderName,
+      number: number,
+      cardType: cardType,
     );
-    await _persistWallet(walletState);
-  }
-
-  Future<void> _setActiveCard(String cardId) async {
-    await _persistWallet(_walletState.copyWith(activeCardId: cardId));
-  }
-
-  Future<void> _topUpBalance(double amount) async {
-    final walletState = _walletState.copyWith(
-      balance: _walletState.balance + amount,
-    );
-    await _persistWallet(walletState);
-
+    final wallet = await TransportApi.getWallet();
     if (!mounted) {
       return;
     }
-
     setState(() {
+      _walletState = wallet;
+    });
+  }
+
+  Future<void> _setActiveCard(String cardId) async {
+    await TransportApi.activateWalletCard(cardId);
+    final wallet = await TransportApi.getWallet();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _walletState = wallet;
+    });
+  }
+
+  Future<void> _topUpBalance(
+    double amount, {
+    String targetType = 'wallet',
+    String? transportCardId,
+  }) async {
+    final wallet = await TransportApi.topUpWallet(
+      amount: amount,
+      cardId: _walletState.activeCard?.id,
+      targetType: targetType,
+      transportCardId: transportCardId,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _walletState = wallet;
       _overlay = null;
     });
   }
 
-  Future<void> _chargeBalance(double amount) async {
-    final nextBalance = math.max(0, _walletState.balance - amount).toDouble();
-    await _persistWallet(_walletState.copyWith(balance: nextBalance));
+  Future<String> _requestRideAccess() async {
+    final response = await TransportApi.requestRideAccess(
+      phoneNumber: _phoneNumber,
+      cityName: _currentCity,
+    );
+    await _refreshSession();
+    return response.message;
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Avtobys Clone',
+      title: _config.appName,
       theme: ThemeData(
         useMaterial3: true,
         scaffoldBackgroundColor: Colors.white,
@@ -221,16 +351,24 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     }
 
     if (_selectedTab == RootTab.qr) {
-      return QrScannerScreen(onClose: () => _selectTab(_lastContentTab));
+      return TransportPaymentOverlay(
+        mode: TransportSearchMode.qr,
+        phoneNumber: _phoneNumber,
+        cityName: _currentCity,
+        walletState: _walletState,
+        rideAccessEnabled: _user?.rideAccessEnabled ?? false,
+        trialRidesRemaining: _user?.trialRidesRemaining ?? _config.trialRideCount,
+        accessTelegram: _config.accessRequestTelegram,
+        onBack: () => _selectTab(_lastContentTab),
+        onSessionRefresh: _refreshSession,
+      );
     }
 
     return Scaffold(
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          Positioned.fill(
-            child: SafeArea(bottom: false, child: _buildScreen()),
-          ),
+          Positioned.fill(child: SafeArea(bottom: false, child: _buildScreen())),
           Align(
             alignment: Alignment.bottomCenter,
             child: BottomTabBar(
@@ -245,8 +383,15 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
   }
 
   Widget _buildScreen() {
-    final city = _selectedCity ?? cityOptions[2];
-    final phoneNumber = _phoneNumber ?? '+7 700-255-56-19';
+    final city = _currentCity;
+    final phoneNumber =
+        _phoneNumber.isNotEmpty ? _phoneNumber : '+7 700-255-56-19';
+    final activeCard = _walletState.activeCard;
+    final cardSubtitle = activeCard == null
+        ? 'Добавить карту'
+        : activeCard.isTransport
+            ? 'Транспортная ${activeCard.maskedNumber}'
+            : activeCard.maskedNumber;
 
     switch (_selectedTab) {
       case RootTab.home:
@@ -272,8 +417,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
       case RootTab.menu:
         return MenuTabScreen(
           city: city,
-          bankCardSubtitle:
-              _walletState.activeCard?.maskedNumber ?? 'Добавить карту',
+          bankCardSubtitle: cardSubtitle,
           onOpenNotifications: () => _selectTab(RootTab.notifications),
           onOpenCity: () => _openOverlay(AppOverlay.cityPicker),
           onOpenSettings: () => _openOverlay(AppOverlay.settings),
@@ -285,18 +429,27 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
   }
 
   Widget _buildOverlayScreen() {
-    final city = _selectedCity ?? cityOptions[2];
-    final phoneNumber = _phoneNumber ?? '+7 700-255-56-19';
+    final city = _currentCity;
+    final phoneNumber =
+        _phoneNumber.isNotEmpty ? _phoneNumber : '+7 700-255-56-19';
 
     switch (_overlay!) {
       case AppOverlay.login:
-        return LoginEntryScreen(onContinue: _savePhoneNumber);
+        return LoginEntryScreen(
+          onRequestCode: _requestCode,
+          onVerifyCode: _verifyCode,
+          supportTelegram: _config.accessRequestTelegram,
+          initialPhoneNumber: _phoneNumber,
+        );
       case AppOverlay.cityPicker:
         return CityPickerOverlay(
           selectedCity: city,
+          cities: _cities.isNotEmpty
+              ? _cities.map((item) => item.name).toList()
+              : cityOptions,
           onSelected: _saveCity,
           onBack: _closeOverlay,
-          showBack: _phoneNumber != null,
+          showBack: _user != null,
         );
       case AppOverlay.payments:
         return PaymentsOverlay(
@@ -310,29 +463,40 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
           mode: TransportSearchMode.bluetooth,
           phoneNumber: phoneNumber,
           cityName: city,
-          walletBalance: _walletState.balance,
+          walletState: _walletState,
+          rideAccessEnabled: _user?.rideAccessEnabled ?? false,
+          trialRidesRemaining: _user?.trialRidesRemaining ?? _config.trialRideCount,
+          accessTelegram: _config.accessRequestTelegram,
           onBack: _closeOverlay,
-          onPaid: _chargeBalance,
+          onSessionRefresh: _refreshSession,
         );
       case AppOverlay.plate:
         return TransportPaymentOverlay(
           mode: TransportSearchMode.plate,
           phoneNumber: phoneNumber,
           cityName: city,
-          walletBalance: _walletState.balance,
+          walletState: _walletState,
+          rideAccessEnabled: _user?.rideAccessEnabled ?? false,
+          trialRidesRemaining: _user?.trialRidesRemaining ?? _config.trialRideCount,
+          accessTelegram: _config.accessRequestTelegram,
           onBack: _closeOverlay,
-          onPaid: _chargeBalance,
+          onSessionRefresh: _refreshSession,
         );
       case AppOverlay.tickets:
-        return TicketsOverlay(phoneNumber: phoneNumber, onBack: _closeOverlay);
+        return TicketsOverlay(onBack: _closeOverlay);
       case AppOverlay.settings:
         return SettingsOverlay(
           phoneNumber: phoneNumber,
           city: city,
           walletState: _walletState,
+          rideAccessEnabled: _user?.rideAccessEnabled ?? false,
+          trialRidesRemaining: _user?.trialRidesRemaining ?? _config.trialRideCount,
+          accessTelegram: _config.accessRequestTelegram,
           onBack: _closeOverlay,
           onLogout: _logout,
           onOpenCards: () => _openOverlay(AppOverlay.cards),
+          onOpenCity: () => _openOverlay(AppOverlay.cityPicker),
+          onRequestAccess: _requestRideAccess,
         );
       case AppOverlay.cards:
         return CardsOverlay(
@@ -343,71 +507,12 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
         );
       case AppOverlay.topUp:
         return TopUpOverlay(
-          currentBalance: _walletState.balance,
+          walletState: _walletState,
+          minimumAmount: _config.minimumTopUpAmount,
           onBack: _closeOverlay,
           onTopUp: _topUpBalance,
         );
     }
-  }
-}
-
-class HomeScreenLegacy extends StatelessWidget {
-  const HomeScreenLegacy({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ColoredBox(
-      color: AppColors.background,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 12, 24, 140),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _TopOfferCard(
-              title: 'Оформить\nльготный тариф',
-              icon: Icons.discount_outlined,
-            ),
-            const SizedBox(height: 14),
-            const _WalletSection(),
-            const SizedBox(height: 16),
-            const _ServiceGrid(),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 92,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: promoCards.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 12),
-                itemBuilder: (context, index) => SizedBox(
-                  width: index == 0 ? 262 : 206,
-                  child: _PromoCard(data: promoCards[index]),
-                ),
-              ),
-            ),
-            const SizedBox(height: 28),
-            const Text(
-              'Предложения',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 196,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: offerCards.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 12),
-                itemBuilder: (context, index) =>
-                    _OfferCard(data: offerCards[index]),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
@@ -509,7 +614,11 @@ class HomeScreen extends StatelessWidget {
 class _WalletSection extends StatelessWidget {
   const _WalletSection({
     this.phoneNumber = '',
-    this.walletState = const WalletState(balance: 0, cards: []),
+    this.walletState = const WalletState(
+      balance: 0,
+      cards: [],
+      transactions: [],
+    ),
     this.onOpenQr,
     this.onOpenBluetooth,
     this.onOpenPlate,
@@ -548,7 +657,7 @@ class _WalletSection extends StatelessWidget {
                     onTap: onOpenTopUp,
                   ),
                 ),
-                SizedBox(width: 12),
+                const SizedBox(width: 12),
                 Expanded(
                   flex: 3,
                   child: WalletCardsTile(
@@ -581,118 +690,6 @@ class _WalletSection extends StatelessWidget {
                   ),
                 )
                 .toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class RoutesScreen extends StatelessWidget {
-  const RoutesScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 18, 24, 140),
-      child: Column(
-        children: [
-          const _SelectorField(
-            icon: Icons.location_on_outlined,
-            value: 'Актау',
-            accent: AppColors.primaryBlueDark,
-            trailing: Icons.keyboard_arrow_down_rounded,
-          ),
-          const SizedBox(height: 16),
-          const _SelectorField(
-            icon: Icons.search_rounded,
-            value: 'Поиск',
-            trailing: null,
-          ),
-          const SizedBox(height: 20),
-          Column(
-            children: routeItems
-                .map(
-                  (route) => _RouteRow(
-                    data: route,
-                    showDivider: route != routeItems.last,
-                  ),
-                )
-                .toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class MenuScreen extends StatelessWidget {
-  const MenuScreen({super.key, required this.onOpenNotifications});
-
-  final VoidCallback onOpenNotifications;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(0, 14, 0, 140),
-      child: Column(
-        children: [
-          ...settingsMenuItems.map(
-            (item) => _MenuRow(
-              data: item,
-              showDivider: item != settingsMenuItems.last,
-              onTap: item.title == 'Уведомления' ? onOpenNotifications : null,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
-            child: Container(
-              decoration: BoxDecoration(
-                color: AppColors.banner,
-                borderRadius: BorderRadius.circular(22),
-                boxShadow: appCardShadow,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
-              child: Row(
-                children: [
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Поделиться с друзьями',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                        SizedBox(height: 6),
-                        Text(
-                          'Отправить ссылку на приложение',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Color(0xFFD7DCEC),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    height: 56,
-                    width: 56,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.ios_share_rounded,
-                      color: AppColors.banner,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ),
         ],
       ),
@@ -753,135 +750,6 @@ class NotificationsScreen extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class QrScannerScreen extends StatelessWidget {
-  const QrScannerScreen({super.key, required this.onClose});
-
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.dark,
-        statusBarBrightness: Brightness.light,
-      ),
-      child: Scaffold(
-        body: Stack(
-          children: [
-            const Positioned.fill(
-              child: CustomPaint(painter: ScannerBackdropPainter()),
-            ),
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.06),
-                      Colors.black.withValues(alpha: 0.30),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(22, 8, 22, 34),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _ScannerActionButton(
-                          icon: Icons.flash_on_rounded,
-                          onTap: () {},
-                        ),
-                        _ScannerActionButton(
-                          icon: Icons.close_rounded,
-                          onTap: onClose,
-                        ),
-                      ],
-                    ),
-                    const Spacer(flex: 3),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 280),
-                      child: const ScannerFrame(),
-                    ),
-                    const SizedBox(height: 20),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 14,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.banner.withValues(alpha: 0.78),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const Text(
-                        'Наведите камеру на QR-код',
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: Color(0xFFD7DCEC),
-                        ),
-                      ),
-                    ),
-                    const Spacer(flex: 4),
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: AppColors.banner.withValues(alpha: 0.90),
-                        borderRadius: BorderRadius.circular(22),
-                        boxShadow: appCardShadow,
-                      ),
-                      padding: const EdgeInsets.all(24),
-                      child: const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Кошелек',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              Text(
-                                '0,00 ₸',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                          SizedBox(height: 10),
-                          Text(
-                            '+7 (700) 255-56-19  Стандарт',
-                            style: TextStyle(
-                              fontSize: 15,
-                              color: Color(0xFFD7DCEC),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -985,367 +853,45 @@ class BottomTabBar extends StatelessWidget {
   }
 }
 
-class _TopOfferCard extends StatelessWidget {
-  const _TopOfferCard({required this.title, required this.icon});
+class _ServiceGrid extends StatelessWidget {
+  const _ServiceGrid({
+    this.onOpenPayments,
+    this.onOpenTransfers,
+    this.onOpenTickets,
+  });
 
-  final String title;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF3F5FA),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: const Color(0xFFF0F2F8)),
-      ),
-      padding: const EdgeInsets.fromLTRB(18, 16, 16, 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                fontSize: 19,
-                height: 1.15,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          _TopOfferArt(icon: icon),
-        ],
-      ),
-    );
-  }
-}
-
-class _TopOfferArt extends StatelessWidget {
-  const _TopOfferArt({required this.icon});
-
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 98,
-      height: 86,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned(
-            right: 0,
-            top: 0,
-            child: Container(
-              width: 78,
-              height: 78,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFFFCF49), Color(0xFFFFB113)],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 10,
-            top: 10,
-            child: Container(
-              width: 46,
-              height: 54,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 22,
-            top: 20,
-            child: Column(
-              children: [
-                Icon(icon, color: Colors.white, size: 30),
-                const SizedBox(height: 4),
-                Container(
-                  width: 20,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.85),
-                    borderRadius: BorderRadius.circular(100),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Positioned(
-            right: -2,
-            bottom: 6,
-            child: Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFFFFE7A8),
-                border: Border.all(color: const Color(0xFFFFD257), width: 2),
-              ),
-              child: const Icon(
-                Icons.percent_rounded,
-                size: 16,
-                color: Color(0xFFE29B00),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class WalletCardLegacy extends StatelessWidget {
-  const WalletCardLegacy({super.key});
+  final VoidCallback? onOpenPayments;
+  final VoidCallback? onOpenTransfers;
+  final VoidCallback? onOpenTickets;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF2E74FF), Color(0xFF1E54F5)],
-        ),
-        boxShadow: appCardShadow,
-      ),
-      padding: const EdgeInsets.fromLTRB(20, 18, 18, 18),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
-                child: const CustomPaint(painter: _WalletPatternPainter()),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 4,
-            top: 4,
-            child: Container(
-              height: 54,
-              width: 54,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.16),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.add_rounded,
-                color: Colors.white,
-                size: 30,
-              ),
-            ),
-          ),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Text(
-                'Баланс',
-                style: TextStyle(fontSize: 15, color: Color(0xFFE6EBFF)),
-              ),
-              SizedBox(height: 8),
-              Text(
-                '0,00 ₸',
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                ),
-              ),
-              SizedBox(height: 14),
-              Text(
-                'Стандарт',
-                style: TextStyle(fontSize: 16, color: Color(0xFFD7DEFF)),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class AddCardTileLegacy extends StatelessWidget {
-  const AddCardTileLegacy({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE4E8F0), width: 1.2),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
-      child: const Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 44,
-            height: 44,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.all(Radius.circular(14)),
-                border: Border.fromBorderSide(
-                  BorderSide(color: Color(0xFFE2E6EF)),
-                ),
-              ),
-              child: Icon(
-                Icons.add_rounded,
-                color: AppColors.textSecondary,
-                size: 28,
-              ),
-            ),
-          ),
-          SizedBox(height: 16),
-          Text(
-            'Добавить\nкарту',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 16,
-              height: 1.2,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ignore: unused_element
-class _WalletCard extends StatelessWidget {
-  const _WalletCard({required this.walletState});
-
-  final WalletState walletState;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF2E74FF), Color(0xFF1E54F5)],
-        ),
+        borderRadius: BorderRadius.circular(30),
         boxShadow: appCardShadow,
       ),
-      padding: const EdgeInsets.fromLTRB(20, 18, 18, 18),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
-                child: const CustomPaint(painter: _WalletPatternPainter()),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 4,
-            top: 4,
-            child: Container(
-              height: 54,
-              width: 54,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.16),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.add_rounded,
-                color: Colors.white,
-                size: 30,
-              ),
-            ),
-          ),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Text(
-                'Баланс',
-                style: TextStyle(fontSize: 15, color: Color(0xFFE6EBFF)),
-              ),
-              SizedBox(height: 6),
-              Text(
-                '0,00 ₸',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
+      child: Column(
+        children: serviceItems
+            .map(
+              (item) => Padding(
+                padding: EdgeInsets.only(
+                  bottom: item == serviceItems.last ? 0 : 12,
+                ),
+                child: _ServiceTile(
+                  data: item,
+                  onTap: switch (item.id) {
+                    'payments' => onOpenPayments,
+                    'tickets' => onOpenTickets,
+                    'transfers' => onOpenTransfers,
+                    _ => null,
+                  },
                 ),
               ),
-              SizedBox(height: 10),
-              Text(
-                'Стандарт',
-                style: TextStyle(fontSize: 16, color: Color(0xFFD7DEFF)),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ignore: unused_element
-class _AddCardTile extends StatelessWidget {
-  const _AddCardTile();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE4E8F0), width: 1.2),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
-      child: const Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 44,
-            height: 44,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.all(Radius.circular(14)),
-                border: Border.fromBorderSide(
-                  BorderSide(color: Color(0xFFE2E6EF)),
-                ),
-              ),
-              child: Icon(
-                Icons.add_rounded,
-                color: AppColors.textSecondary,
-                size: 28,
-              ),
-            ),
-          ),
-          SizedBox(height: 16),
-          Text(
-            'Добавить\nкарту',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 16,
-              height: 1.2,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
+            )
+            .toList(),
       ),
     );
   }
@@ -1361,79 +907,34 @@ class _ActionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(22),
       child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xFFE8EBF2)),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: const Color(0xFFE4E8F0)),
         ),
-        padding: const EdgeInsets.symmetric(vertical: 16),
         child: Column(
           children: [
             Container(
-              height: 46,
-              width: 46,
-              decoration: const BoxDecoration(
-                color: Color(0xFFF4F7FF),
-                shape: BoxShape.circle,
+              height: 44,
+              width: 44,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEAF0FF),
+                borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(data.icon, color: AppColors.primaryBlue, size: 24),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 14),
             Text(
               data.title,
               style: const TextStyle(
                 fontSize: 15,
-                fontWeight: FontWeight.w500,
                 color: AppColors.textPrimary,
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ServiceGrid extends StatelessWidget {
-  const _ServiceGrid({
-    this.onOpenPayments,
-    this.onOpenTransfers,
-    this.onOpenTickets,
-  });
-
-  final VoidCallback? onOpenPayments;
-  final VoidCallback? onOpenTransfers;
-  final VoidCallback? onOpenTickets;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: appCardShadow,
-      ),
-      child: GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: serviceItems.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          childAspectRatio: 2.06,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-        ),
-        itemBuilder: (context, index) => _ServiceTile(
-          data: serviceItems[index],
-          onTap: switch (serviceItems[index].id) {
-            'payments' => onOpenPayments,
-            'tickets' => onOpenTickets,
-            'transfers' => onOpenTransfers,
-            _ => null,
-          },
         ),
       ),
     );
@@ -1485,6 +986,79 @@ class _ServiceTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _TopOfferCard extends StatelessWidget {
+  const _TopOfferCard({required this.title, required this.icon});
+
+  final String title;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F5FA),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: const Color(0xFFF0F2F8)),
+      ),
+      padding: const EdgeInsets.fromLTRB(18, 16, 16, 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: 19,
+                height: 1.15,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ),
+          Container(
+            height: 86,
+            width: 86,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFFFD36C), Color(0xFFFABE0C)],
+              ),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Positioned(
+                  bottom: 12,
+                  right: 14,
+                  child: Icon(
+                    icon,
+                    color: Colors.white.withValues(alpha: 0.92),
+                    size: 38,
+                  ),
+                ),
+                Positioned(
+                  top: 14,
+                  left: 14,
+                  child: Container(
+                    height: 16,
+                    width: 16,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1611,31 +1185,6 @@ class _PromoArtwork extends StatelessWidget {
   }
 }
 
-class _WalletPatternPainter extends CustomPainter {
-  const _WalletPatternPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final textPainter = TextPainter(textDirection: TextDirection.ltr);
-    final style = TextStyle(
-      color: Colors.white.withValues(alpha: 0.07),
-      fontSize: 16,
-      fontWeight: FontWeight.w600,
-    );
-
-    for (double y = 16; y < size.height; y += 18) {
-      for (double x = size.width * 0.48; x < size.width + 24; x += 44) {
-        textPainter.text = TextSpan(text: '0101', style: style);
-        textPainter.layout();
-        textPainter.paint(canvas, Offset(x, y));
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
 class _OfferCard extends StatelessWidget {
   const _OfferCard({required this.data});
 
@@ -1715,55 +1264,10 @@ class _OfferCard extends StatelessWidget {
   }
 }
 
-class _SelectorField extends StatelessWidget {
-  const _SelectorField({
-    required this.icon,
-    required this.value,
-    this.trailing,
-    this.accent = AppColors.textSecondary,
-  });
+class _MenuRow extends StatelessWidget {
+  const _MenuRow({required this.data, required this.showDivider});
 
-  final IconData icon;
-  final String value;
-  final IconData? trailing;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 70,
-      decoration: BoxDecoration(
-        color: AppColors.surfaceMuted,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 18),
-      child: Row(
-        children: [
-          Icon(icon, color: accent, size: 30),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: 18,
-                color: accent == AppColors.primaryBlueDark
-                    ? AppColors.primaryBlueDark
-                    : AppColors.textSecondary,
-              ),
-            ),
-          ),
-          if (trailing != null)
-            Icon(trailing, color: AppColors.textSecondary, size: 28),
-        ],
-      ),
-    );
-  }
-}
-
-class _RouteRow extends StatelessWidget {
-  const _RouteRow({required this.data, required this.showDivider});
-
-  final RouteItemData data;
+  final MenuItemData data;
   final bool showDivider;
 
   @override
@@ -1774,25 +1278,19 @@ class _RouteRow extends StatelessWidget {
             ? const Border(bottom: BorderSide(color: AppColors.border))
             : null,
       ),
-      padding: const EdgeInsets.symmetric(vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            margin: const EdgeInsets.only(top: 2),
-            height: 48,
-            width: 48,
+            height: 64,
+            width: 64,
             decoration: const BoxDecoration(
-              color: AppColors.primaryBlue,
+              color: AppColors.accentYellow,
               shape: BoxShape.circle,
             ),
-            child: const Icon(
-              Icons.directions_bus_rounded,
-              color: Colors.white,
-              size: 28,
-            ),
+            child: Icon(data.icon, color: Colors.white, size: 32),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1801,89 +1299,29 @@ class _RouteRow extends StatelessWidget {
                   data.title,
                   style: const TextStyle(
                     fontSize: 18,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w500,
                     color: AppColors.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  data.subtitle,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: AppColors.textPrimary,
+                if (data.subtitle != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    data.subtitle!,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
+          const Icon(
+            Icons.chevron_right_rounded,
+            size: 34,
+            color: AppColors.textPrimary,
+          ),
         ],
-      ),
-    );
-  }
-}
-
-class _MenuRow extends StatelessWidget {
-  const _MenuRow({required this.data, required this.showDivider, this.onTap});
-
-  final MenuItemData data;
-  final bool showDivider;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          border: showDivider
-              ? const Border(bottom: BorderSide(color: AppColors.border))
-              : null,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
-        child: Row(
-          children: [
-            Container(
-              height: 64,
-              width: 64,
-              decoration: const BoxDecoration(
-                color: AppColors.accentYellow,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(data.icon, color: Colors.white, size: 32),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    data.title,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  if (data.subtitle != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      data.subtitle!,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const Icon(
-              Icons.chevron_right_rounded,
-              size: 34,
-              color: AppColors.textPrimary,
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1926,225 +1364,4 @@ class _BottomTabItem extends StatelessWidget {
       ),
     );
   }
-}
-
-class _ScannerActionButton extends StatelessWidget {
-  const _ScannerActionButton({required this.icon, required this.onTap});
-
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        height: 42,
-        width: 42,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.82),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(icon, color: Colors.black54, size: 24),
-      ),
-    );
-  }
-}
-
-class ScannerFrame extends StatelessWidget {
-  const ScannerFrame({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 1,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(24),
-              ),
-            ),
-          ),
-          ..._buildCorners(),
-        ],
-      ),
-    );
-  }
-
-  List<Widget> _buildCorners() {
-    const lineColor = AppColors.primaryBlue;
-    const lineThickness = 6.0;
-    const arm = 38.0;
-    return [
-      Positioned(
-        left: 0,
-        top: 0,
-        child: Container(
-          height: lineThickness,
-          width: arm,
-          decoration: BoxDecoration(
-            color: lineColor,
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-      ),
-      Positioned(
-        left: 0,
-        top: 0,
-        child: Container(
-          width: lineThickness,
-          height: arm,
-          decoration: BoxDecoration(
-            color: lineColor,
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-      ),
-      Positioned(
-        right: 0,
-        top: 0,
-        child: Container(
-          height: lineThickness,
-          width: arm,
-          decoration: BoxDecoration(
-            color: lineColor,
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-      ),
-      Positioned(
-        right: 0,
-        top: 0,
-        child: Container(
-          width: lineThickness,
-          height: arm,
-          decoration: BoxDecoration(
-            color: lineColor,
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-      ),
-      Positioned(
-        left: 0,
-        bottom: 0,
-        child: Container(
-          height: lineThickness,
-          width: arm,
-          decoration: BoxDecoration(
-            color: lineColor,
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-      ),
-      Positioned(
-        left: 0,
-        bottom: 0,
-        child: Container(
-          width: lineThickness,
-          height: arm,
-          decoration: BoxDecoration(
-            color: lineColor,
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-      ),
-      Positioned(
-        right: 0,
-        bottom: 0,
-        child: Container(
-          height: lineThickness,
-          width: arm,
-          decoration: BoxDecoration(
-            color: lineColor,
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-      ),
-      Positioned(
-        right: 0,
-        bottom: 0,
-        child: Container(
-          width: lineThickness,
-          height: arm,
-          decoration: BoxDecoration(
-            color: lineColor,
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-      ),
-    ];
-  }
-}
-
-class ScannerBackdropPainter extends CustomPainter {
-  const ScannerBackdropPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final background = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF7E7E7E), Color(0xFF3F3F3F)],
-      ).createShader(Offset.zero & size);
-    canvas.drawRect(Offset.zero & size, background);
-
-    final random = math.Random(27);
-    final tileWidth = size.width / 4.8;
-    final tileHeight = tileWidth * 1.15;
-
-    for (
-      double y = -tileHeight;
-      y < size.height + tileHeight;
-      y += tileHeight * 0.92
-    ) {
-      for (
-        double x = -tileWidth;
-        x < size.width + tileWidth;
-        x += tileWidth * 0.94
-      ) {
-        final rect = RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-            x + random.nextDouble() * 4,
-            y + random.nextDouble() * 5,
-            tileWidth - 5,
-            tileHeight - 5,
-          ),
-          const Radius.circular(4),
-        );
-        final shade = Color.lerp(
-          const Color(0xFF565656),
-          const Color(0xFF8F8F8F),
-          random.nextDouble(),
-        )!;
-        canvas.drawRRect(
-          rect,
-          Paint()
-            ..color = shade.withValues(
-              alpha: 0.38 + random.nextDouble() * 0.20,
-            ),
-        );
-
-        if (random.nextDouble() > 0.85) {
-          final highlight = Rect.fromLTWH(
-            x + tileWidth * 0.32,
-            y + tileHeight * 0.24,
-            tileWidth * 0.26,
-            tileHeight * 0.22,
-          );
-          canvas.drawRRect(
-            RRect.fromRectAndRadius(highlight, const Radius.circular(8)),
-            Paint()..color = Colors.white.withValues(alpha: 0.20),
-          );
-        }
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

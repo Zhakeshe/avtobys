@@ -9,6 +9,7 @@ import {
   getAuthSession,
   logoutAuth,
   requestAuthCode,
+  requestRideAccess,
   setApiSessionToken,
   topUpWallet,
   updateProfile,
@@ -69,6 +70,9 @@ export default function MobileRoot() {
   const [sessionToken, setSessionTokenState] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [selectedCity, setSelectedCity] = useState("");
+  const [rideAccessEnabled, setRideAccessEnabled] = useState(false);
+  const [trialRidesRemaining, setTrialRidesRemaining] = useState(0);
+  const [accessRequestTelegram, setAccessRequestTelegram] = useState("@aqxrx");
   const [walletState, setWalletState] = useState<WalletState>(emptyWalletState);
 
   useEffect(() => {
@@ -98,6 +102,9 @@ export default function MobileRoot() {
           setSessionTokenState("");
           setPhoneNumber("");
           setSelectedCity("");
+          setRideAccessEnabled(false);
+          setTrialRidesRemaining(0);
+          setAccessRequestTelegram("@aqxrx");
           setWalletState(emptyWalletState);
           setOverlay("login");
         }
@@ -119,6 +126,9 @@ export default function MobileRoot() {
     setSessionTokenState(token);
     setPhoneNumber(session.user.phoneNumber);
     setSelectedCity(session.user.cityName || "");
+    setRideAccessEnabled(session.user.rideAccessEnabled);
+    setTrialRidesRemaining(session.user.trialRidesRemaining);
+    setAccessRequestTelegram(session.config.accessRequestTelegram || "@aqxrx");
     setWalletState(hydrateWalletState(session.wallet));
     setOverlay(session.user.cityName ? null : "city");
   };
@@ -131,6 +141,7 @@ export default function MobileRoot() {
   const currentCity = selectedCity || "Актау";
   const currentPhone = phoneNumber || "+7 700-255-56-19";
   const activeCard = getActiveCard(walletState);
+  const activeTransportCard = activeCard?.cardType === "transport" ? activeCard : null;
 
   const openTab = (tab: TabKey) => {
     if (tab === "qr") {
@@ -151,6 +162,7 @@ export default function MobileRoot() {
       phoneNumber: result.phoneNumber,
       debugCode: result.debugCode,
       deliveryStatus: result.delivery?.status ?? "",
+      supportTelegram: result.supportTelegram,
     };
   };
 
@@ -182,6 +194,9 @@ export default function MobileRoot() {
     setSessionTokenState("");
     setPhoneNumber("");
     setSelectedCity("");
+    setRideAccessEnabled(false);
+    setTrialRidesRemaining(0);
+    setAccessRequestTelegram("@aqxrx");
     setWalletState(emptyWalletState);
     setActiveTab("home");
     setLastContentTab("home");
@@ -202,13 +217,24 @@ export default function MobileRoot() {
     await refreshSession();
   };
 
-  const topUpBalance = async (amount: number) => {
+  const topUpBalance = async (amount: number, targetType: "wallet" | "transport") => {
     const nextWallet = await topUpWallet({
       amount,
       cardId: walletState.activeCardId,
+      targetType,
+      transportCardId: targetType === "transport" ? walletState.activeCardId : null,
     });
     setWalletState(hydrateWalletState(nextWallet));
     setOverlay(null);
+  };
+
+  const requestAccess = async () => {
+    const result = await requestRideAccess({
+      phoneNumber: currentPhone,
+      cityName: currentCity,
+    });
+    setAccessRequestTelegram(result.telegramUsername || "@aqxrx");
+    await refreshSession();
   };
 
   const refreshWalletAfterPayment = async (_amount: number) => {
@@ -258,6 +284,7 @@ export default function MobileRoot() {
         phoneNumber={currentPhone}
         cityName={currentCity}
         walletBalance={walletState.balance}
+        activeTransportCard={activeTransportCard}
         onBack={() => setOverlay(null)}
         onPaid={(amount) => void refreshWalletAfterPayment(amount)}
       />
@@ -271,6 +298,7 @@ export default function MobileRoot() {
         phoneNumber={currentPhone}
         cityName={currentCity}
         walletBalance={walletState.balance}
+        activeTransportCard={activeTransportCard}
         onBack={() => setOverlay(null)}
         onPaid={(amount) => void refreshWalletAfterPayment(amount)}
       />
@@ -283,9 +311,13 @@ export default function MobileRoot() {
         phoneNumber={currentPhone}
         city={currentCity}
         walletState={walletState}
+        rideAccessEnabled={rideAccessEnabled}
+        trialRidesRemaining={trialRidesRemaining}
+        accessRequestTelegram={accessRequestTelegram}
         onBack={() => setOverlay(null)}
         onLogout={logout}
         onOpenCards={() => setOverlay("cards")}
+        onRequestAccess={() => void requestAccess()}
       />
     );
   }
@@ -307,8 +339,9 @@ export default function MobileRoot() {
     return (
       <TopUpScreen
         balance={walletState.balance}
+        activeCard={activeCard}
         onBack={() => setOverlay(null)}
-        onTopUp={(amount) => void topUpBalance(amount)}
+        onTopUp={(amount, targetType) => void topUpBalance(amount, targetType)}
       />
     );
   }
@@ -323,6 +356,7 @@ export default function MobileRoot() {
         phoneNumber={currentPhone}
         cityName={currentCity}
         walletBalance={walletState.balance}
+        activeTransportCard={activeTransportCard}
         onBack={() => openTab(lastContentTab)}
         onPaid={(amount) => void refreshWalletAfterPayment(amount)}
       />

@@ -3,6 +3,7 @@ export type WalletCardData = {
   holderName: string;
   number: string;
   cardType: "bank" | "transport";
+  balance?: number;
 };
 
 export type WalletState = {
@@ -23,7 +24,7 @@ export function walletStorageKey(phoneNumber: string) {
 }
 
 export function normalizeCardNumber(value: string) {
-  return value.replace(/\D/g, "");
+  return value.replace(/\s+/g, "").toUpperCase();
 }
 
 export function maskCardNumber(value: string) {
@@ -46,6 +47,7 @@ export function hydrateWalletState(raw: unknown): WalletState {
     holderName: card.holderName ?? "Моя карта",
     number: card.number ?? "",
     cardType: card.cardType === "transport" ? "transport" : "bank",
+    balance: typeof card.balance === "number" ? card.balance : 0,
   }));
 
   return {

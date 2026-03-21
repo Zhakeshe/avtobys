@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'data.dart';
 import 'theme.dart';
+import 'transport_api.dart';
 import 'wallet_store.dart';
 
 enum AppOverlay {
@@ -18,7 +19,16 @@ enum AppOverlay {
   topUp,
 }
 
-class RoutesTabScreen extends StatelessWidget {
+typedef AuthCodeRequestCallback = Future<AuthCodeRequestDto> Function(
+  String phoneNumber,
+);
+typedef AuthCodeVerifyCallback = Future<void> Function(
+  String phoneNumber,
+  String code,
+);
+typedef RequestRideAccessCallback = Future<String> Function();
+
+class RoutesTabScreen extends StatefulWidget {
   const RoutesTabScreen({
     super.key,
     required this.city,
@@ -29,58 +39,119 @@ class RoutesTabScreen extends StatelessWidget {
   final VoidCallback onOpenCity;
 
   @override
+  State<RoutesTabScreen> createState() => _RoutesTabScreenState();
+}
+
+class _RoutesTabScreenState extends State<RoutesTabScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  bool _loading = true;
+  String _error = '';
+  List<BusDto> _buses = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRoutes();
+  }
+
+  @override
+  void didUpdateWidget(covariant RoutesTabScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.city != widget.city) {
+      _loadRoutes();
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadRoutes() async {
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
+
+    try {
+      final cities = await TransportApi.getCities();
+      if (cities.isEmpty) {
+        throw const ApiException('Города пока не добавлены.');
+      }
+      final city = cities.firstWhere(
+        (item) => item.name == widget.city,
+        orElse: () => cities.first,
+      );
+      final buses = await TransportApi.getBuses(city.id);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _buses = buses;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 18, 24, 140),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: onOpenCity,
-            borderRadius: BorderRadius.circular(18),
-            child: Container(
-              height: 70,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceMuted,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.location_on_outlined,
-                    color: AppColors.primaryBlueDark,
-                    size: 30,
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Text(
-                      city,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        color: AppColors.primaryBlueDark,
-                      ),
-                    ),
-                  ),
-                  const Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    color: AppColors.textSecondary,
-                    size: 28,
-                  ),
-                ],
-              ),
+    final query = _searchController.text.trim().toLowerCase();
+    final filtered = query.isEmpty
+        ? _buses
+        : _buses
+              .where(
+                (bus) =>
+                    bus.number.toLowerCase().contains(query) ||
+                    bus.routeNumber.toLowerCase().contains(query) ||
+                    bus.tariffName.toLowerCase().contains(query),
+              )
+              .toList();
+
+    return RefreshIndicator(
+      onRefresh: _loadRoutes,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(24, 18, 24, 140),
+        child: Column(
+          children: [
+            _CitySelector(city: widget.city, onTap: widget.onOpenCity),
+            const SizedBox(height: 16),
+            _SearchField(
+              controller: _searchController,
+              hintText: 'Поиск маршрута или номера',
+              onChanged: (_) => setState(() {}),
             ),
-          ),
-          const SizedBox(height: 16),
-          const _SearchField(hintText: 'Поиск'),
-          const SizedBox(height: 20),
-          ...routeItems.map(
-            (item) => _RouteItemRow(
-              title: item.title,
-              subtitle: item.subtitle,
-              showDivider: item != routeItems.last,
-            ),
-          ),
-        ],
+            const SizedBox(height: 20),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.only(top: 48),
+                child: CircularProgressIndicator(color: AppColors.primaryBlue),
+              )
+            else if (filtered.isEmpty)
+              _InfoCard(
+                message: _error.isNotEmpty
+                    ? _error
+                    : 'В выбранном городе автобусы пока не добавлены.',
+              )
+            else
+              ...filtered.map(
+                (bus) => _RouteItemRow(
+                  title: 'Маршрут ${bus.routeNumber}',
+                  subtitle: '${bus.number} • ${bus.tariffName}',
+                  showDivider: bus != filtered.last,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -126,7 +197,6 @@ class MenuTabScreen extends StatelessWidget {
                           icon: item.icon,
                         )
                       : item);
-
             return _MenuListTile(
               data: rowItem,
               showDivider: item != settingsMenuItems.last,
@@ -148,9 +218,9 @@ class MenuTabScreen extends StatelessWidget {
                 boxShadow: appCardShadow,
               ),
               padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
-              child: Row(
+              child: const Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -173,18 +243,7 @@ class MenuTabScreen extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Container(
-                    height: 56,
-                    width: 56,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.ios_share_rounded,
-                      color: AppColors.banner,
-                    ),
-                  ),
+                  _ShareBubble(),
                 ],
               ),
             ),
@@ -196,42 +255,114 @@ class MenuTabScreen extends StatelessWidget {
 }
 
 class LoginEntryScreen extends StatefulWidget {
-  const LoginEntryScreen({super.key, required this.onContinue});
+  const LoginEntryScreen({
+    super.key,
+    required this.onRequestCode,
+    required this.onVerifyCode,
+    required this.supportTelegram,
+    this.initialPhoneNumber,
+  });
 
-  final ValueChanged<String> onContinue;
+  final AuthCodeRequestCallback onRequestCode;
+  final AuthCodeVerifyCallback onVerifyCode;
+  final String supportTelegram;
+  final String? initialPhoneNumber;
 
   @override
   State<LoginEntryScreen> createState() => _LoginEntryScreenState();
 }
 
 class _LoginEntryScreenState extends State<LoginEntryScreen> {
-  final TextEditingController _controller = TextEditingController();
+  late final TextEditingController _phoneController;
+  final TextEditingController _codeController = TextEditingController();
+  bool _requesting = false;
+  bool _verifying = false;
+  bool _awaitingCode = false;
+  String _error = '';
+  String? _debugCode;
 
-  bool get _canContinue => _digits.length >= 10;
+  String get _digits => _phoneController.text.replaceAll(RegExp(r'\D'), '');
+  bool get _canRequestCode => _digits.length >= 10;
+  bool get _canVerifyCode => _codeController.text.trim().length >= 4;
 
-  String get _digits => _controller.text.replaceAll(RegExp(r'\D'), '');
+  String get _phoneNumber {
+    final raw = _digits.padRight(10, ' ');
+    final parts = <String>[
+      raw.substring(0, 3).trim(),
+      raw.substring(3, 6).trim(),
+      raw.substring(6, 8).trim(),
+      raw.substring(8, 10).trim(),
+    ].where((part) => part.isNotEmpty).toList();
+    return '+7 ${parts.join('-')}';
+  }
 
-  String get _maskedValue {
-    final raw = _digits.padRight(10);
-    final a = raw.substring(0, 3).trim();
-    final b = raw.substring(3, 6).trim();
-    final c = raw.substring(6, 8).trim();
-    final d = raw.substring(8, 10).trim();
-    final parts = <String>[a, b, c, d].where((part) => part.isNotEmpty).toList();
-    return parts.join('-');
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialPhoneNumber?.replaceAll(RegExp(r'\D'), '') ?? '';
+    _phoneController = TextEditingController(
+      text: initial.startsWith('7') && initial.length > 10
+          ? initial.substring(initial.length - 10)
+          : initial,
+    );
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _phoneController.dispose();
+    _codeController.dispose();
     super.dispose();
   }
 
-  void _submit() {
-    if (!_canContinue) {
+  Future<void> _requestCode() async {
+    if (!_canRequestCode || _requesting) {
       return;
     }
-    widget.onContinue('+7 ${_maskedValue.trim()}');
+    setState(() {
+      _requesting = true;
+      _error = '';
+      _debugCode = null;
+    });
+    try {
+      final response = await widget.onRequestCode(_phoneNumber);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _awaitingCode = true;
+        _requesting = false;
+        _debugCode = response.debugCode;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _requesting = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  Future<void> _verifyCode() async {
+    if (!_canVerifyCode || _verifying) {
+      return;
+    }
+    setState(() {
+      _verifying = true;
+      _error = '';
+    });
+    try {
+      await widget.onVerifyCode(_phoneNumber, _codeController.text.trim());
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _verifying = false;
+        _error = error.toString();
+      });
+    }
   }
 
   @override
@@ -244,169 +375,136 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
       child: Scaffold(
         backgroundColor: Colors.white,
         body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(
-                  height: 170,
-                  child: Stack(
-                    alignment: Alignment.bottomCenter,
-                    children: [
-                      Positioned.fill(
-                        child: CustomPaint(painter: _SkylinePainter()),
-                      ),
-                      Container(
-                        height: 52,
-                        width: 52,
-                        decoration: BoxDecoration(
-                          color: AppColors.accentYellow,
-                          borderRadius: BorderRadius.circular(14),
-                          boxShadow: appCardShadow,
-                        ),
-                        child: const Icon(
-                          Icons.directions_bus_rounded,
-                          color: Colors.white,
-                          size: 30,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(30),
-                    boxShadow: appCardShadow,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Center(
-                        child: SizedBox(
-                          width: 78,
-                          child: Divider(
-                            thickness: 5,
-                            color: Color(0xFFD7D7D7),
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      height: 170,
+                      child: Stack(
+                        alignment: Alignment.bottomCenter,
+                        children: [
+                          Positioned.fill(
+                            child: CustomPaint(painter: _SkylinePainter()),
                           ),
-                        ),
+                          Container(
+                            height: 52,
+                            width: 52,
+                            decoration: BoxDecoration(
+                              color: AppColors.accentYellow,
+                              borderRadius: BorderRadius.circular(14),
+                              boxShadow: appCardShadow,
+                            ),
+                            child: const Icon(
+                              Icons.directions_bus_rounded,
+                              color: Colors.white,
+                              size: 30,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 22),
-                      const Text(
-                        'Введите номер телефона',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(30),
+                        boxShadow: appCardShadow,
                       ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Вам придет код подтверждения',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 26),
-                      Container(
-                        padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(24),
-                          color: Colors.white,
-                          boxShadow: appCardShadow,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Страна и номер телефона',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textPrimary,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Center(
+                            child: SizedBox(
+                              width: 78,
+                              child: Divider(
+                                thickness: 5,
+                                color: Color(0xFFD7D7D7),
                               ),
                             ),
-                            const SizedBox(height: 16),
-                            Container(
-                              height: 72,
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              decoration: BoxDecoration(
-                                color: AppColors.surfaceMuted,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Text(
-                                    '🇰🇿',
-                                    style: TextStyle(fontSize: 22),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  const Text(
-                                    '+7',
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      color: AppColors.textPrimary,
-                                    ),
-                                  ),
-                                  Container(
-                                    width: 1,
-                                    height: 30,
-                                    margin: const EdgeInsets.symmetric(horizontal: 16),
-                                    color: const Color(0xFF3C3C3C),
-                                  ),
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _controller,
-                                      keyboardType: TextInputType.phone,
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly,
-                                        LengthLimitingTextInputFormatter(10),
-                                      ],
-                                      onChanged: (_) => setState(() {}),
-                                      decoration: const InputDecoration(
-                                        hintText: 'Введите номер телефона',
-                                        border: InputBorder.none,
-                                        hintStyle: TextStyle(
-                                          color: AppColors.textSecondary,
-                                        ),
-                                      ),
-                                      style: const TextStyle(
-                                        fontSize: 18,
-                                        color: AppColors.textPrimary,
-                                      ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    onPressed: _controller.text.isEmpty
-                                        ? null
-                                        : () {
-                                            _controller.clear();
-                                            setState(() {});
-                                          },
-                                    icon: const Icon(
-                                      Icons.cancel_rounded,
-                                      color: Color(0xFF494949),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                          ),
+                          const SizedBox(height: 22),
+                          Text(
+                            _awaitingCode
+                                ? 'Введите код входа'
+                                : 'Введите номер телефона',
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _awaitingCode
+                                ? 'Код отправлен в Telegram. Для входа введите его ниже.'
+                                : 'Код подтверждения придет в Telegram.',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          if (_awaitingCode)
+                            _CodeEntryCard(
+                              phoneNumber: _phoneNumber,
+                              controller: _codeController,
+                              onChanged: (_) => setState(() {}),
+                              onChangePhone: () {
+                                setState(() {
+                                  _awaitingCode = false;
+                                  _error = '';
+                                  _codeController.clear();
+                                });
+                              },
+                            )
+                          else
+                            _PhoneEntryCard(
+                              controller: _phoneController,
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          if (_debugCode != null) ...[
+                            const SizedBox(height: 14),
+                            _InfoCard(
+                              message: 'Debug-код: $_debugCode',
+                              background: const Color(0xFFFFF3D8),
+                              color: const Color(0xFF6B4D00),
                             ),
                           ],
-                        ),
+                          if (_error.isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            _InfoCard(
+                              message: _error,
+                              background: const Color(0xFFFFE4E4),
+                              color: const Color(0xFFB32828),
+                            ),
+                          ],
+                          const SizedBox(height: 14),
+                          Text(
+                            'Если код не пришел, напишите ${widget.supportTelegram}.',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              height: 1.35,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 24),
+                    _PrimaryButton(
+                      label: _awaitingCode ? 'Войти' : 'Далее',
+                      enabled: _awaitingCode ? _canVerifyCode : _canRequestCode,
+                      busy: _awaitingCode ? _verifying : _requesting,
+                      onTap: _awaitingCode ? _verifyCode : _requestCode,
+                    ),
+                  ],
                 ),
-                const Spacer(),
-                _PrimaryButton(
-                  label: 'Далее',
-                  enabled: _canContinue,
-                  onTap: _submit,
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -419,12 +517,14 @@ class CityPickerOverlay extends StatefulWidget {
   const CityPickerOverlay({
     super.key,
     required this.selectedCity,
+    required this.cities,
     required this.onSelected,
     required this.onBack,
     this.showBack = true,
   });
 
   final String selectedCity;
+  final List<String> cities;
   final ValueChanged<String> onSelected;
   final VoidCallback onBack;
   final bool showBack;
@@ -436,16 +536,6 @@ class CityPickerOverlay extends StatefulWidget {
 class _CityPickerOverlayState extends State<CityPickerOverlay> {
   final TextEditingController _controller = TextEditingController();
 
-  List<String> get _filteredCities {
-    final query = _controller.text.trim().toLowerCase();
-    if (query.isEmpty) {
-      return cityOptions;
-    }
-    return cityOptions
-        .where((city) => city.toLowerCase().contains(query))
-        .toList();
-  }
-
   @override
   void dispose() {
     _controller.dispose();
@@ -454,15 +544,17 @@ class _CityPickerOverlayState extends State<CityPickerOverlay> {
 
   @override
   Widget build(BuildContext context) {
+    final query = _controller.text.trim().toLowerCase();
+    final cities = query.isEmpty
+        ? widget.cities
+        : widget.cities.where((city) => city.toLowerCase().contains(query)).toList();
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
         child: Column(
           children: [
-            _PageHeader(
-              title: '',
-              onBack: widget.showBack ? widget.onBack : null,
-            ),
+            _PageHeader(title: '', onBack: widget.showBack ? widget.onBack : null),
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 4, 24, 0),
               child: _SearchField(
@@ -476,9 +568,9 @@ class _CityPickerOverlayState extends State<CityPickerOverlay> {
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                itemCount: _filteredCities.length,
+                itemCount: cities.length,
                 itemBuilder: (context, index) {
-                  final city = _filteredCities[index];
+                  final city = cities[index];
                   final isSelected = city == widget.selectedCity;
                   return InkWell(
                     onTap: () => widget.onSelected(city),
@@ -503,10 +595,7 @@ class _CityPickerOverlayState extends State<CityPickerOverlay> {
                                 color: AppColors.primaryBlue,
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(
-                                Icons.check_rounded,
-                                color: Colors.white,
-                              ),
+                              child: const Icon(Icons.check_rounded, color: Colors.white),
                             ),
                         ],
                       ),
@@ -550,9 +639,9 @@ class PaymentsOverlay extends StatelessWidget {
               child: Row(
                 children: [
                   _TopTab(label: 'Платежи', selected: true),
-                  SizedBox(width: 26),
+                  SizedBox(width: 28),
                   _TopTab(label: 'Избранное'),
-                  SizedBox(width: 26),
+                  SizedBox(width: 28),
                   _TopTab(label: 'История'),
                 ],
               ),
@@ -567,10 +656,8 @@ class PaymentsOverlay extends StatelessWidget {
                   return _OverlayListRow(
                     title: item.title,
                     icon: item.icon,
-                    color: AppColors.accentYellow,
-                    onTap: item.title.contains('Переводы')
-                        ? onOpenTransfers
-                        : null,
+                    color: const Color(0xFFFFC322),
+                    onTap: item.title == 'Переводы баланса' ? onOpenTransfers : null,
                   );
                 },
               ),
@@ -620,125 +707,69 @@ class TransfersOverlay extends StatelessWidget {
   }
 }
 
-class BluetoothPaymentOverlay extends StatelessWidget {
-  const BluetoothPaymentOverlay({
-    super.key,
-    required this.phoneNumber,
-    required this.onBack,
-  });
-
-  final String phoneNumber;
-  final VoidCallback onBack;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _PageHeader(title: 'Bluetooth оплата', onBack: onBack),
-              const SizedBox(height: 24),
-              _DarkWalletCard(phoneNumber: phoneNumber),
-              const Spacer(),
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _LoadingDot(size: 8),
-                  SizedBox(width: 8),
-                  _LoadingDot(size: 20),
-                  SizedBox(width: 8),
-                  _LoadingDot(size: 18),
-                ],
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Идет поиск доступного\nтранспорта',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const Spacer(flex: 2),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class PlatePaymentOverlay extends StatefulWidget {
-  const PlatePaymentOverlay({super.key, required this.onBack});
-
-  final VoidCallback onBack;
-
-  @override
-  State<PlatePaymentOverlay> createState() => _PlatePaymentOverlayState();
-}
-
-class _PlatePaymentOverlayState extends State<PlatePaymentOverlay> {
-  final TextEditingController _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _PageHeader(title: 'Оплата по гос. номеру', onBack: widget.onBack),
-              const SizedBox(height: 30),
-              _SearchField(
-                controller: _controller,
-                hintText: 'Введите гос. номер транспорта',
-                onChanged: (_) => setState(() {}),
-              ),
-              const Spacer(),
-              _PrimaryButton(
-                label: 'Далее',
-                enabled: _controller.text.trim().isNotEmpty,
-                onTap: () {},
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class SettingsOverlay extends StatelessWidget {
+class SettingsOverlay extends StatefulWidget {
   const SettingsOverlay({
     super.key,
     required this.phoneNumber,
     required this.city,
     required this.walletState,
+    required this.rideAccessEnabled,
+    required this.trialRidesRemaining,
+    required this.accessTelegram,
     required this.onBack,
     required this.onLogout,
     required this.onOpenCards,
+    required this.onOpenCity,
+    required this.onRequestAccess,
   });
 
   final String phoneNumber;
   final String city;
   final WalletState walletState;
+  final bool rideAccessEnabled;
+  final int trialRidesRemaining;
+  final String accessTelegram;
   final VoidCallback onBack;
   final VoidCallback onLogout;
   final VoidCallback onOpenCards;
+  final VoidCallback onOpenCity;
+  final RequestRideAccessCallback onRequestAccess;
+
+  @override
+  State<SettingsOverlay> createState() => _SettingsOverlayState();
+}
+
+class _SettingsOverlayState extends State<SettingsOverlay> {
+  bool _requesting = false;
+  String _message = '';
+
+  Future<void> _requestAccess() async {
+    if (_requesting) {
+      return;
+    }
+    setState(() {
+      _requesting = true;
+      _message = '';
+    });
+    try {
+      final message = await widget.onRequestAccess();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _requesting = false;
+        _message = message;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _requesting = false;
+        _message = error.toString();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -749,7 +780,7 @@ class SettingsOverlay extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
           child: Column(
             children: [
-              _PageHeader(title: 'Настройки', onBack: onBack),
+              _PageHeader(title: 'Настройки', onBack: widget.onBack),
               const SizedBox(height: 20),
               Container(
                 width: double.infinity,
@@ -762,7 +793,7 @@ class SettingsOverlay extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      phoneNumber,
+                      widget.phoneNumber,
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
@@ -771,7 +802,7 @@ class SettingsOverlay extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      city,
+                      widget.city,
                       style: const TextStyle(
                         fontSize: 16,
                         color: AppColors.textSecondary,
@@ -779,10 +810,32 @@ class SettingsOverlay extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'Баланс: ${formatBalance(walletState.balance)} ₸',
+                      'Баланс: ${formatBalance(widget.walletState.balance)} ₸',
                       style: const TextStyle(
                         fontSize: 15,
                         color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: widget.rideAccessEnabled
+                            ? const Color(0xFFD8F5DE)
+                            : const Color(0xFFFFF3D8),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        widget.rideAccessEnabled
+                            ? 'Доступ к поездкам активен'
+                            : 'Осталось пробных поездок: ${widget.trialRidesRemaining}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: widget.rideAccessEnabled
+                              ? const Color(0xFF1D6A2A)
+                              : const Color(0xFF6B4D00),
+                        ),
                       ),
                     ),
                   ],
@@ -790,22 +843,290 @@ class SettingsOverlay extends StatelessWidget {
               ),
               const SizedBox(height: 20),
               _OverlayListRow(
+                title: 'Мой город',
+                icon: Icons.location_on_outlined,
+                color: const Color(0xFFE7EDFF),
+                onTap: widget.onOpenCity,
+              ),
+              _OverlayListRow(
                 title: 'Мои карты',
                 icon: Icons.credit_card_rounded,
                 color: const Color(0xFFE7EDFF),
-                onTap: onOpenCards,
+                onTap: widget.onOpenCards,
               ),
-              const SizedBox(height: 8),
-              _OverlayListRow(
-                title: 'Выйти',
-                icon: Icons.logout_rounded,
-                color: const Color(0xFFFFE0E0),
-                iconColor: const Color(0xFFB32828),
-                onTap: onLogout,
+              if (!widget.rideAccessEnabled)
+                _OverlayListRow(
+                  title: _requesting
+                      ? 'Отправляем запрос...'
+                      : 'Запросить доступ к поездкам',
+                  icon: Icons.lock_open_rounded,
+                  color: const Color(0xFFFFF3D8),
+                  iconColor: const Color(0xFF6B4D00),
+                  onTap: _requesting ? null : _requestAccess,
+                ),
+              const SizedBox(height: 10),
+              _InfoCard(
+                message: 'Для активации поездок пишите ${widget.accessTelegram}.',
+                background: Colors.white,
+                color: AppColors.textSecondary,
+                bordered: true,
+              ),
+              if (_message.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _InfoCard(
+                  message: _message,
+                  background: const Color(0xFFE9F1FF),
+                  color: AppColors.primaryBlueDark,
+                ),
+              ],
+              const Spacer(),
+              SizedBox(
+                width: double.infinity,
+                height: 58,
+                child: ElevatedButton(
+                  onPressed: widget.onLogout,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFE0E0),
+                    foregroundColor: const Color(0xFFB32828),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                  child: const Text(
+                    'Выйти',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                  ),
+                ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _CitySelector extends StatelessWidget {
+  const _CitySelector({required this.city, required this.onTap});
+
+  final String city;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        height: 70,
+        decoration: BoxDecoration(
+          color: AppColors.surfaceMuted,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.location_on_outlined,
+              color: AppColors.primaryBlueDark,
+              size: 30,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                city,
+                style: const TextStyle(
+                  fontSize: 18,
+                  color: AppColors.primaryBlueDark,
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: AppColors.textSecondary,
+              size: 28,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PhoneEntryCard extends StatelessWidget {
+  const _PhoneEntryCard({
+    required this.controller,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        color: Colors.white,
+        boxShadow: appCardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Страна и номер телефона',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            height: 72,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceMuted,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                const Text('🇰🇿', style: TextStyle(fontSize: 22)),
+                const SizedBox(width: 10),
+                const Text(
+                  '+7',
+                  style: TextStyle(fontSize: 18, color: AppColors.textPrimary),
+                ),
+                Container(
+                  width: 1,
+                  height: 30,
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  color: const Color(0xFF3C3C3C),
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(10),
+                    ],
+                    onChanged: onChanged,
+                    decoration: const InputDecoration(
+                      hintText: 'Введите номер телефона',
+                      border: InputBorder.none,
+                      hintStyle: TextStyle(color: AppColors.textSecondary),
+                    ),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: controller.text.isEmpty
+                      ? null
+                      : () {
+                          controller.clear();
+                          onChanged('');
+                        },
+                  icon: const Icon(
+                    Icons.cancel_rounded,
+                    color: Color(0xFF494949),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CodeEntryCard extends StatelessWidget {
+  const _CodeEntryCard({
+    required this.phoneNumber,
+    required this.controller,
+    required this.onChanged,
+    required this.onChangePhone,
+  });
+
+  final String phoneNumber;
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onChangePhone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        color: Colors.white,
+        boxShadow: appCardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Код подтверждения',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            phoneNumber,
+            style: const TextStyle(fontSize: 15, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            height: 72,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceMuted,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.password_rounded,
+                  color: AppColors.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(6),
+                    ],
+                    onChanged: onChanged,
+                    decoration: const InputDecoration(
+                      hintText: 'Введите код',
+                      border: InputBorder.none,
+                    ),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      letterSpacing: 3,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: onChangePhone,
+                  child: const Text('Изменить'),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -926,10 +1247,7 @@ class _OverlayListRow extends StatelessWidget {
             Expanded(
               child: Text(
                 title,
-                style: const TextStyle(
-                  fontSize: 17,
-                  color: AppColors.textPrimary,
-                ),
+                style: const TextStyle(fontSize: 17, color: AppColors.textPrimary),
               ),
             ),
             const Icon(Icons.chevron_right_rounded, size: 30),
@@ -993,10 +1311,7 @@ class _RouteItemRow extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   subtitle,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: AppColors.textPrimary,
-                  ),
+                  style: const TextStyle(fontSize: 16, color: AppColors.textPrimary),
                 ),
               ],
             ),
@@ -1078,54 +1393,49 @@ class _MenuListTile extends StatelessWidget {
   }
 }
 
-class _DarkWalletCard extends StatelessWidget {
-  const _DarkWalletCard({required this.phoneNumber});
-
-  final String phoneNumber;
+class _ShareBubble extends StatelessWidget {
+  const _ShareBubble();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: AppColors.banner,
-        borderRadius: BorderRadius.circular(22),
+      height: 56,
+      width: 56,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
       ),
-      child: Column(
-        children: [
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Кошелек',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                ),
-              ),
-              Text(
-                '0,00 ₸',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              '$phoneNumber  Стандарт',
-              style: const TextStyle(
-                fontSize: 15,
-                color: Color(0xFFD7DCEC),
-              ),
-            ),
-          ),
-        ],
+      child: const Icon(Icons.ios_share_rounded, color: AppColors.banner),
+    );
+  }
+}
+
+class _InfoCard extends StatelessWidget {
+  const _InfoCard({
+    required this.message,
+    this.background = AppColors.surfaceMuted,
+    this.color = AppColors.textSecondary,
+    this.bordered = false,
+  });
+
+  final String message;
+  final Color background;
+  final Color color;
+  final bool bordered;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(18),
+        border: bordered ? Border.all(color: AppColors.border) : null,
+      ),
+      child: Text(
+        message,
+        style: TextStyle(fontSize: 14, height: 1.35, color: color),
       ),
     );
   }
@@ -1136,10 +1446,12 @@ class _PrimaryButton extends StatelessWidget {
     required this.label,
     required this.enabled,
     required this.onTap,
+    this.busy = false,
   });
 
   final String label;
   final bool enabled;
+  final bool busy;
   final VoidCallback onTap;
 
   @override
@@ -1147,7 +1459,7 @@ class _PrimaryButton extends StatelessWidget {
     return SizedBox(
       height: 64,
       child: ElevatedButton(
-        onPressed: enabled ? onTap : null,
+        onPressed: enabled && !busy ? onTap : null,
         style: ElevatedButton.styleFrom(
           elevation: 0,
           backgroundColor:
@@ -1158,7 +1470,16 @@ class _PrimaryButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
           ),
         ),
-        child: Text(label, style: const TextStyle(fontSize: 18)),
+        child: busy
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: Colors.white,
+                ),
+              )
+            : Text(label, style: const TextStyle(fontSize: 18)),
       ),
     );
   }
@@ -1192,24 +1513,6 @@ class _TopTab extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _LoadingDot extends StatelessWidget {
-  const _LoadingDot({required this.size});
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: size,
-      width: size,
-      decoration: const BoxDecoration(
-        color: AppColors.accentYellow,
-        shape: BoxShape.circle,
-      ),
     );
   }
 }

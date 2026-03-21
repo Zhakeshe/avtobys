@@ -47,6 +47,7 @@ export type WalletCardDto = {
   holderName: string;
   number: string;
   cardType: "bank" | "transport";
+  balance?: number;
   addedAt?: string;
 };
 
@@ -77,6 +78,10 @@ export type UserDto = {
   status: string;
   createdAt: string;
   updatedAt: string;
+  rideAccessEnabled: boolean;
+  trialRidesRemaining: number;
+  accessRequestedAt?: string | null;
+  accessNote?: string;
   settings: {
     language: string;
     notificationsEnabled: boolean;
@@ -88,6 +93,7 @@ export type PublicConfigDto = {
   appName: string;
   supportPhone: string;
   supportTelegram: string;
+  accessRequestTelegram: string;
   loginDeliveryMode: string;
   defaultLanguage: string;
   availableLanguages: string[];
@@ -97,6 +103,7 @@ export type PublicConfigDto = {
   minimumTopUpAmount: number;
   maintenanceMode: boolean;
   debugAuthCodeVisible: boolean;
+  trialRideCount: number;
 };
 
 export type AuthRequestDto = {
@@ -104,6 +111,7 @@ export type AuthRequestDto = {
   phoneNumber: string;
   expiresAt: string;
   debugCode?: string;
+  supportTelegram?: string;
   delivery?: {
     status: string;
     chatId?: string;
@@ -115,6 +123,12 @@ export type AuthSessionDto = {
   user: UserDto;
   wallet: WalletDto;
   config: PublicConfigDto;
+};
+
+export type ApiRequestError = Error & {
+  code?: string;
+  supportTelegram?: string;
+  status?: number;
 };
 
 type RequestOptions = RequestInit & {
@@ -155,7 +169,21 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       data && typeof data === "object" && "message" in data && typeof data.message === "string"
         ? data.message
         : `Request failed: ${response.status}`;
-    throw new Error(message);
+    const error = Object.assign(new Error(message), {
+      code:
+        data && typeof data === "object" && "code" in data && typeof data.code === "string"
+          ? data.code
+          : undefined,
+      supportTelegram:
+        data &&
+        typeof data === "object" &&
+        "supportTelegram" in data &&
+        typeof data.supportTelegram === "string"
+          ? data.supportTelegram
+          : undefined,
+      status: response.status,
+    }) as ApiRequestError;
+    throw error;
   }
 
   return data as T;
@@ -230,10 +258,22 @@ export function activateWalletCard(cardId: string) {
   });
 }
 
-export function topUpWallet(input: { amount: number; cardId?: string | null }) {
+export function topUpWallet(input: {
+  amount: number;
+  cardId?: string | null;
+  targetType?: "wallet" | "transport";
+  transportCardId?: string | null;
+}) {
   return request<WalletDto>("/wallet/top-up", {
     method: "POST",
     body: JSON.stringify(input),
+  });
+}
+
+export function requestRideAccess(input?: { phoneNumber?: string; cityName?: string }) {
+  return request<{ ok: boolean; telegramUsername: string; message: string }>("/access/request", {
+    method: "POST",
+    body: JSON.stringify(input || {}),
   });
 }
 

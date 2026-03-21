@@ -5,18 +5,16 @@ import 'theme.dart';
 import 'transport_api.dart';
 import 'wallet_store.dart';
 
-enum TransportSearchMode { bluetooth, plate }
+enum TransportSearchMode { bluetooth, plate, qr }
 
-typedef ChargeBalanceCallback = Future<void> Function(double amount);
+typedef RefreshSessionCallback = Future<void> Function();
 
 class TicketsOverlay extends StatefulWidget {
   const TicketsOverlay({
     super.key,
-    required this.phoneNumber,
     required this.onBack,
   });
 
-  final String phoneNumber;
   final VoidCallback onBack;
 
   @override
@@ -41,7 +39,7 @@ class _TicketsOverlayState extends State<TicketsOverlay> {
     });
 
     try {
-      final tickets = await TransportApi.getTickets(widget.phoneNumber);
+      final tickets = await TransportApi.getTickets();
       if (!mounted) {
         return;
       }
@@ -55,7 +53,7 @@ class _TicketsOverlayState extends State<TicketsOverlay> {
       }
       setState(() {
         _loading = false;
-        _error = 'Не удалось загрузить билеты';
+        _error = 'Не удалось загрузить билеты.';
       });
     }
   }
@@ -81,7 +79,7 @@ class _TicketsOverlayState extends State<TicketsOverlay> {
               _OverlayHeader(title: 'Мои билеты', onBack: widget.onBack),
               const SizedBox(height: 18),
               const Text(
-                'Последний билет',
+                'Последние билеты',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -101,20 +99,16 @@ class _TicketsOverlayState extends State<TicketsOverlay> {
                         child: _tickets.isEmpty
                             ? ListView(
                                 children: [
-                                  const _EmptyStateCard(
-                                    message:
-                                        'Билетов пока нет. Оплатите проезд по номеру автобуса или через Bluetooth.',
+                                  _InfoBox(
+                                    message: _error.isNotEmpty
+                                        ? _error
+                                        : 'Билетов пока нет. Оплатите проезд по номеру автобуса, QR token или из списка валидаторов.',
                                   ),
-                                  if (_error.isNotEmpty) ...[
-                                    const SizedBox(height: 12),
-                                    _ErrorLabel(message: _error),
-                                  ],
                                 ],
                               )
                             : ListView.separated(
                                 itemCount: _tickets.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(height: 12),
+                                separatorBuilder: (_, _) => const SizedBox(height: 12),
                                 itemBuilder: (context, index) {
                                   final ticket = _tickets[index];
                                   return InkWell(
@@ -144,16 +138,14 @@ class _TicketsOverlayState extends State<TicketsOverlay> {
                                           const SizedBox(width: 12),
                                           Expanded(
                                             child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
+                                              crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
                                                 Text(
                                                   'Маршрут ${ticket.routeNumber}',
                                                   style: const TextStyle(
                                                     fontSize: 16,
                                                     fontWeight: FontWeight.w700,
-                                                    color:
-                                                        AppColors.textPrimary,
+                                                    color: AppColors.textPrimary,
                                                   ),
                                                 ),
                                                 const SizedBox(height: 4),
@@ -161,8 +153,7 @@ class _TicketsOverlayState extends State<TicketsOverlay> {
                                                   '${ticket.busNumber} • ${ticket.cityName}',
                                                   style: const TextStyle(
                                                     fontSize: 13,
-                                                    color:
-                                                        AppColors.textSecondary,
+                                                    color: AppColors.textSecondary,
                                                   ),
                                                 ),
                                               ],
@@ -198,17 +189,23 @@ class TransportPaymentOverlay extends StatefulWidget {
     required this.mode,
     required this.phoneNumber,
     required this.cityName,
-    required this.walletBalance,
+    required this.walletState,
+    required this.rideAccessEnabled,
+    required this.trialRidesRemaining,
+    required this.accessTelegram,
     required this.onBack,
-    required this.onPaid,
+    required this.onSessionRefresh,
   });
 
   final TransportSearchMode mode;
   final String phoneNumber;
   final String cityName;
-  final double walletBalance;
+  final WalletState walletState;
+  final bool rideAccessEnabled;
+  final int trialRidesRemaining;
+  final String accessTelegram;
   final VoidCallback onBack;
-  final ChargeBalanceCallback onPaid;
+  final RefreshSessionCallback onSessionRefresh;
 
   @override
   State<TransportPaymentOverlay> createState() =>
@@ -229,6 +226,22 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
   BusDto? _selectedBus;
 
   bool get _isPlate => widget.mode == TransportSearchMode.plate;
+  bool get _isQr => widget.mode == TransportSearchMode.qr;
+  bool get _isBluetooth => widget.mode == TransportSearchMode.bluetooth;
+
+  WalletCardData? get _transportCard {
+    for (final card in widget.walletState.cards) {
+      if (card.id == widget.walletState.activeCardId && card.isTransport) {
+        return card;
+      }
+    }
+    for (final card in widget.walletState.cards) {
+      if (card.isTransport) {
+        return card;
+      }
+    }
+    return null;
+  }
 
   @override
   void initState() {
@@ -251,55 +264,52 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
 
     try {
       final cities = await TransportApi.getCities();
+      if (cities.isEmpty) {
+        throw const ApiException('Города пока не настроены.');
+      }
       final city = cities.firstWhere(
         (item) => item.name == widget.cityName,
         orElse: () => cities.first,
       );
       final tariffs = await TransportApi.getTariffs(city.id);
-      final buses = _isPlate
-          ? const <BusDto>[]
-          : await TransportApi.getBuses(
-              city.id,
-              number: _queryController.text.trim(),
-            );
+      var buses = const <BusDto>[];
+      if (_isBluetooth) {
+        buses = (await TransportApi.getBuses(city.id))
+            .where((item) => item.bluetoothEnabled)
+            .toList();
+      }
 
       if (!mounted) {
         return;
       }
-
-      final preparedBuses = _isPlate
-          ? buses
-          : buses.where((item) => item.bluetoothEnabled).toList();
-
       setState(() {
         _cityId = city.id;
         _tariffs = tariffs;
         _selectedTariffId = tariffs.isNotEmpty ? tariffs.first.id : null;
-        _buses = preparedBuses;
-        _selectedBus = preparedBuses.isNotEmpty ? preparedBuses.first : null;
+        _buses = buses;
+        _selectedBus = buses.isNotEmpty ? buses.first : null;
         _loading = false;
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
         _loading = false;
-        _error = 'Не удалось загрузить автобусы';
+        _error = error.toString();
       });
     }
   }
 
-  Future<void> _searchBuses(String value) async {
-    if (_cityId.isEmpty || !_isPlate) {
+  Future<void> _search() async {
+    if (_cityId.isEmpty) {
       return;
     }
-
-    if (value.trim().isEmpty) {
+    final query = _queryController.text.trim();
+    if (query.isEmpty) {
       setState(() {
-        _buses = const [];
-        _selectedBus = null;
-        _loading = false;
+        _buses = _isBluetooth ? _buses : const [];
+        _selectedBus = _isBluetooth && _buses.isNotEmpty ? _buses.first : null;
         _error = '';
       });
       return;
@@ -312,7 +322,11 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
     });
 
     try {
-      final buses = await TransportApi.getBuses(_cityId, number: value.trim());
+      final buses = await TransportApi.getBuses(
+        _cityId,
+        number: _isPlate ? query.toUpperCase() : '',
+        qrToken: _isQr ? query : '',
+      );
       if (!mounted) {
         return;
       }
@@ -321,14 +335,14 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
         _selectedBus = buses.isNotEmpty ? buses.first : null;
         _loading = false;
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
         _buses = const [];
         _loading = false;
-        _error = 'Не удалось выполнить поиск';
+        _error = error.toString();
       });
     }
   }
@@ -337,10 +351,7 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
     final number = _queryController.text.trim().toUpperCase();
     final routeNumber = _routeController.text.trim();
     final tariffId = _selectedTariffId;
-    if (_cityId.isEmpty ||
-        number.isEmpty ||
-        routeNumber.isEmpty ||
-        tariffId == null) {
+    if (_cityId.isEmpty || number.isEmpty || routeNumber.isEmpty || tariffId == null) {
       return;
     }
 
@@ -348,7 +359,6 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
       _saving = true;
       _error = '';
     });
-
     try {
       final bus = await TransportApi.addBus(
         cityId: _cityId,
@@ -364,27 +374,60 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
         _selectedBus = bus;
         _saving = false;
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
         _saving = false;
-        _error = 'Не удалось добавить автобус';
+        _error = error.toString();
       });
     }
   }
 
-  Future<void> _pay() async {
+  Future<void> _pay(String paymentMethod) async {
     final selectedBus = _selectedBus;
     if (selectedBus == null || _saving) {
       return;
     }
-    if (widget.walletBalance < selectedBus.price) {
+
+    if (!widget.rideAccessEnabled && widget.trialRidesRemaining <= 0) {
       setState(() {
-        _error = 'Недостаточно баланса в кошельке';
+        _error =
+            'Доступ к поездкам закрыт. Напишите ${widget.accessTelegram} для активации.';
       });
       return;
+    }
+
+    if (paymentMethod == 'wallet' &&
+        widget.rideAccessEnabled &&
+        widget.walletState.balance < selectedBus.price) {
+      setState(() {
+        _error = 'Недостаточно средств в кошельке.';
+      });
+      return;
+    }
+
+    if (paymentMethod == 'transport-card') {
+      final card = _transportCard;
+      if (!widget.rideAccessEnabled) {
+        setState(() {
+          _error = 'Транспортная карта станет доступна после активации доступа.';
+        });
+        return;
+      }
+      if (card == null) {
+        setState(() {
+          _error = 'Не найдена транспортная карта.';
+        });
+        return;
+      }
+      if (card.balance < selectedBus.price) {
+        setState(() {
+          _error = 'Недостаточно средств на транспортной карте.';
+        });
+        return;
+      }
     }
 
     setState(() {
@@ -396,8 +439,12 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
       final ticket = await TransportApi.createTicket(
         phoneNumber: widget.phoneNumber,
         busId: selectedBus.id,
+        paymentMethod: paymentMethod,
+        cityId: _cityId,
+        cityName: widget.cityName,
+        cardId: paymentMethod == 'transport-card' ? _transportCard?.id : null,
       );
-      await widget.onPaid(selectedBus.price);
+      await widget.onSessionRefresh();
       if (!mounted) {
         return;
       }
@@ -409,19 +456,56 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
         barrierColor: Colors.black.withValues(alpha: 0.28),
         builder: (context) => _TicketDialog(ticket: ticket),
       );
-    } catch (_) {
+    } on ApiException catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
         _saving = false;
-        _error = 'Не удалось создать билет';
+        _error = error.code == 'ACCESS_REQUIRED'
+            ? 'Доступ к поездкам закрыт. Напишите ${error.supportTelegram ?? widget.accessTelegram}.'
+            : error.message;
       });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _saving = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  String get _title {
+    switch (widget.mode) {
+      case TransportSearchMode.bluetooth:
+        return 'Bluetooth оплата';
+      case TransportSearchMode.plate:
+        return 'Оплата по номеру автобуса';
+      case TransportSearchMode.qr:
+        return 'QR оплата';
+    }
+  }
+
+  String get _searchHint {
+    switch (widget.mode) {
+      case TransportSearchMode.bluetooth:
+        return '';
+      case TransportSearchMode.plate:
+        return 'Введите номер транспорта';
+      case TransportSearchMode.qr:
+        return 'Введите QR token автобуса';
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final walletActionLabel = !widget.rideAccessEnabled &&
+            widget.trialRidesRemaining > 0
+        ? 'Использовать пробную поездку'
+        : 'Оплатить кошельком';
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
@@ -430,42 +514,42 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _OverlayHeader(
-                title: _isPlate
-                    ? 'Оплата по номеру автобуса'
-                    : 'Bluetooth оплата',
-                onBack: widget.onBack,
-              ),
-              if (_isPlate) ...[
-                const SizedBox(height: 24),
-                _RoundedInput(
-                  controller: _queryController,
-                  hintText: 'Введите номер транспорта',
-                  onChanged: _searchBuses,
-                ),
-              ] else ...[
+              _OverlayHeader(title: _title, onBack: widget.onBack),
+              if (_isBluetooth) ...[
                 const SizedBox(height: 20),
                 _WalletBanner(
                   phoneNumber: widget.phoneNumber,
-                  balance: widget.walletBalance,
+                  balance: widget.walletState.balance,
+                  transportCard: _transportCard,
                 ),
                 const SizedBox(height: 18),
                 const Text(
-                  'Доступные автобусы рядом',
+                  'Найденные валидаторы',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                     color: AppColors.textPrimary,
                   ),
                 ),
+              ] else ...[
+                const SizedBox(height: 24),
+                _RoundedInput(
+                  controller: _queryController,
+                  hintText: _searchHint,
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 14),
+                _ActionButton(
+                  label: _isQr ? 'Найти автобус по QR token' : 'Далее',
+                  enabled: _queryController.text.trim().isNotEmpty && !_loading,
+                  onTap: _search,
+                ),
               ],
               const SizedBox(height: 16),
               Expanded(
                 child: _loading
                     ? const Center(
-                        child: CircularProgressIndicator(
-                          color: AppColors.primaryBlue,
-                        ),
+                        child: CircularProgressIndicator(color: AppColors.primaryBlue),
                       )
                     : SingleChildScrollView(
                         child: Column(
@@ -485,9 +569,10 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
                                 ),
                               ),
                             ),
-                            if (_isPlate &&
+                            if (!_isBluetooth &&
                                 _queryController.text.trim().isNotEmpty &&
-                                _buses.isEmpty)
+                                _buses.isEmpty &&
+                                _tariffs.isNotEmpty)
                               _AddBusCard(
                                 routeController: _routeController,
                                 tariffs: _tariffs,
@@ -503,13 +588,37 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
                               const SizedBox(height: 10),
                               _PaymentSummaryCard(
                                 bus: _selectedBus!,
-                                onPay: _saving ? null : _pay,
+                                rideAccessEnabled: widget.rideAccessEnabled,
+                                trialRidesRemaining: widget.trialRidesRemaining,
+                                walletActionLabel: walletActionLabel,
+                                canUseWallet: widget.rideAccessEnabled
+                                    ? widget.walletState.balance >= _selectedBus!.price
+                                    : widget.trialRidesRemaining > 0,
+                                canUseTransportCard: widget.rideAccessEnabled &&
+                                    _transportCard != null &&
+                                    _transportCard!.balance >= _selectedBus!.price,
+                                transportCardLabel: _transportCard == null
+                                    ? 'Транспортная карта не добавлена'
+                                    : 'Транспортная карта • ${formatBalance(_transportCard!.balance)} ₸',
+                                onWalletPay: _saving ? null : () => _pay('wallet'),
+                                onTransportPay: _saving || _transportCard == null
+                                    ? null
+                                    : () => _pay('transport-card'),
                               ),
                             ],
                             if (_error.isNotEmpty) ...[
                               const SizedBox(height: 16),
-                              _ErrorLabel(message: _error),
+                              _InfoBox(
+                                message: _error,
+                                background: const Color(0xFFFFE4E4),
+                                color: const Color(0xFFB32828),
+                              ),
                             ],
+                            if (_isBluetooth && _buses.isEmpty && _error.isEmpty)
+                              _InfoBox(
+                                message:
+                                    'Валидаторы для ${widget.cityName} пока не найдены. Добавьте автобусы в админке или выберите оплату по номеру.',
+                              ),
                           ],
                         ),
                       ),
@@ -550,14 +659,10 @@ class _TicketDialog extends StatelessWidget {
                   borderRadius: BorderRadius.circular(18),
                   child: const Padding(
                     padding: EdgeInsets.all(4),
-                    child: Icon(
-                      Icons.close_rounded,
-                      color: AppColors.textSecondary,
-                    ),
+                    child: Icon(Icons.close_rounded, color: AppColors.textSecondary),
                   ),
                 ),
               ),
-              const SizedBox(height: 4),
               const Text(
                 'Номер транспорта',
                 textAlign: TextAlign.center,
@@ -676,10 +781,15 @@ class _OverlayHeader extends StatelessWidget {
 }
 
 class _WalletBanner extends StatelessWidget {
-  const _WalletBanner({required this.phoneNumber, required this.balance});
+  const _WalletBanner({
+    required this.phoneNumber,
+    required this.balance,
+    required this.transportCard,
+  });
 
   final String phoneNumber;
   final double balance;
+  final WalletCardData? transportCard;
 
   @override
   Widget build(BuildContext context) {
@@ -715,7 +825,7 @@ class _WalletBanner extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            '$phoneNumber  Стандарт',
+            '$phoneNumber  ${transportCard?.holderName ?? 'Стандарт'}',
             style: const TextStyle(fontSize: 15, color: Color(0xFFD7DCEC)),
           ),
         ],
@@ -785,9 +895,7 @@ class _BusCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.banner,
           borderRadius: BorderRadius.circular(24),
-          border: selected
-              ? Border.all(color: AppColors.primaryBlue, width: 2)
-              : null,
+          border: selected ? Border.all(color: AppColors.primaryBlue, width: 2) : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -858,7 +966,7 @@ class _AddBusCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Автобус с таким номером не найден',
+            'Автобус не найден. Можно сразу добавить его в базу.',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -868,14 +976,9 @@ class _AddBusCard extends StatelessWidget {
           const SizedBox(height: 14),
           _RoundedInput(
             controller: routeController,
-            hintText: 'Маршрут, например № 12',
+            hintText: 'Маршрут, например №12',
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Тариф',
-            style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
-          ),
-          const SizedBox(height: 4),
           ...tariffs.map(
             (tariff) => Padding(
               padding: const EdgeInsets.only(top: 10),
@@ -883,10 +986,7 @@ class _AddBusCard extends StatelessWidget {
                 onTap: () => onSelectTariff(tariff.id),
                 borderRadius: BorderRadius.circular(16),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 14,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
@@ -932,10 +1032,27 @@ class _AddBusCard extends StatelessWidget {
 }
 
 class _PaymentSummaryCard extends StatelessWidget {
-  const _PaymentSummaryCard({required this.bus, required this.onPay});
+  const _PaymentSummaryCard({
+    required this.bus,
+    required this.rideAccessEnabled,
+    required this.trialRidesRemaining,
+    required this.walletActionLabel,
+    required this.canUseWallet,
+    required this.canUseTransportCard,
+    required this.transportCardLabel,
+    required this.onWalletPay,
+    required this.onTransportPay,
+  });
 
   final BusDto bus;
-  final VoidCallback? onPay;
+  final bool rideAccessEnabled;
+  final int trialRidesRemaining;
+  final String walletActionLabel;
+  final bool canUseWallet;
+  final bool canUseTransportCard;
+  final String transportCardLabel;
+  final VoidCallback? onWalletPay;
+  final VoidCallback? onTransportPay;
 
   @override
   Widget build(BuildContext context) {
@@ -956,30 +1073,21 @@ class _PaymentSummaryCard extends StatelessWidget {
                 style: TextStyle(fontSize: 14, color: Color(0xFFD7DCEC)),
               ),
               const SizedBox(height: 6),
-              Text(
-                bus.number,
-                style: const TextStyle(fontSize: 20, color: Colors.white),
-              ),
+              Text(bus.number, style: const TextStyle(fontSize: 20, color: Colors.white)),
               const SizedBox(height: 14),
               const Text(
                 'Маршрут',
                 style: TextStyle(fontSize: 14, color: Color(0xFFD7DCEC)),
               ),
               const SizedBox(height: 6),
-              Text(
-                bus.routeNumber,
-                style: const TextStyle(fontSize: 20, color: Colors.white),
-              ),
+              Text(bus.routeNumber, style: const TextStyle(fontSize: 20, color: Colors.white)),
               const SizedBox(height: 14),
               const Text(
-                'Вид тарифа',
+                'Тариф',
                 style: TextStyle(fontSize: 14, color: Color(0xFFD7DCEC)),
               ),
               const SizedBox(height: 6),
-              Text(
-                bus.tariffName,
-                style: const TextStyle(fontSize: 20, color: Colors.white),
-              ),
+              Text(bus.tariffName, style: const TextStyle(fontSize: 20, color: Colors.white)),
               const SizedBox(height: 14),
               const Text(
                 'Сумма',
@@ -994,28 +1102,29 @@ class _PaymentSummaryCard extends StatelessWidget {
                   color: Colors.white,
                 ),
               ),
+              if (!rideAccessEnabled) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Пробных поездок осталось: $trialRidesRemaining',
+                  style: const TextStyle(fontSize: 14, color: Color(0xFFD7DCEC)),
+                ),
+              ],
             ],
           ),
         ),
         const SizedBox(height: 20),
         _ActionButton(
-          label: 'Оплатить с помощью кошелька',
-          enabled: onPay != null,
-          onTap: onPay,
+          label: walletActionLabel,
+          enabled: canUseWallet,
+          onTap: onWalletPay,
         ),
         const SizedBox(height: 14),
-        Container(
-          height: 64,
-          decoration: BoxDecoration(
-            color: const Color(0xFFF1F1F1),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: const Center(
-            child: Text(
-              'Другие способы',
-              style: TextStyle(fontSize: 18, color: AppColors.textPrimary),
-            ),
-          ),
+        _ActionButton(
+          label: transportCardLabel,
+          enabled: canUseTransportCard,
+          onTap: onTransportPay,
+          backgroundColor: const Color(0xFFF1F1F1),
+          foregroundColor: AppColors.textPrimary,
         ),
       ],
     );
@@ -1027,11 +1136,15 @@ class _ActionButton extends StatelessWidget {
     required this.label,
     required this.enabled,
     required this.onTap,
+    this.backgroundColor = AppColors.primaryBlue,
+    this.foregroundColor = Colors.white,
   });
 
   final String label;
   final bool enabled;
   final VoidCallback? onTap;
+  final Color backgroundColor;
+  final Color foregroundColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1041,11 +1154,9 @@ class _ActionButton extends StatelessWidget {
         onPressed: enabled ? onTap : null,
         style: ElevatedButton.styleFrom(
           elevation: 0,
-          backgroundColor: enabled
-              ? AppColors.primaryBlue
-              : const Color(0xFFC8C8C8),
+          backgroundColor: enabled ? backgroundColor : const Color(0xFFC8C8C8),
           disabledBackgroundColor: const Color(0xFFC8C8C8),
-          foregroundColor: Colors.white,
+          foregroundColor: foregroundColor,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
           ),
@@ -1056,41 +1167,30 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
-class _EmptyStateCard extends StatelessWidget {
-  const _EmptyStateCard({required this.message});
+class _InfoBox extends StatelessWidget {
+  const _InfoBox({
+    required this.message,
+    this.background = AppColors.surfaceMuted,
+    this.color = AppColors.textSecondary,
+  });
 
   final String message;
+  final Color background;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.surfaceMuted,
+        color: background,
         borderRadius: BorderRadius.circular(22),
       ),
       child: Text(
         message,
-        style: const TextStyle(
-          fontSize: 16,
-          height: 1.35,
-          color: AppColors.textSecondary,
-        ),
+        style: TextStyle(fontSize: 15, height: 1.35, color: color),
       ),
-    );
-  }
-}
-
-class _ErrorLabel extends StatelessWidget {
-  const _ErrorLabel({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      message,
-      style: const TextStyle(fontSize: 14, color: Color(0xFFC62828)),
     );
   }
 }
@@ -1110,10 +1210,7 @@ class _TicketStat extends StatelessWidget {
         children: [
           Text(
             label,
-            style: const TextStyle(
-              fontSize: 13,
-              color: AppColors.textSecondary,
-            ),
+            style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 4),
           Text(

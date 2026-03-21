@@ -9,6 +9,7 @@ import {
   getActiveCard,
   maskCardNumber,
   normalizeCardNumber,
+  type WalletCardData,
   type WalletState,
 } from "./wallet-store";
 
@@ -20,6 +21,7 @@ export function LoginScreen({
     phoneNumber: string;
     debugCode?: string;
     deliveryStatus?: string;
+    supportTelegram?: string;
   }>;
   onVerifyCode: (value: string, code: string) => Promise<void>;
 }) {
@@ -42,11 +44,7 @@ export function LoginScreen({
       if (step === "phone") {
         const result = await onRequestCode(formattedPhone);
         setRequestPhone(result.phoneNumber);
-        setStatusMessage(
-          result.debugCode
-            ? `Код отправлен в Telegram. Debug code: ${result.debugCode}`
-            : `Код отправлен в Telegram (${result.deliveryStatus || "pending"})`,
-        );
+        setStatusMessage(formatLoginStatus(result));
         setStep("code");
         setCode("");
       } else {
@@ -71,7 +69,7 @@ export function LoginScreen({
       <View style={styles.loginCard}>
         <View style={styles.dragHandle} />
         <Text style={styles.loginTitle}>Введите номер телефона</Text>
-        <Text style={styles.loginSubtitle}>Вам придет код подтверждения</Text>
+        <Text style={styles.loginSubtitle}>Код придет в Telegram</Text>
 
         <View style={styles.phoneCard}>
           <Text style={styles.phoneCardTitle}>Страна и номер телефона</Text>
@@ -235,25 +233,67 @@ export function SettingsScreen({
   phoneNumber,
   city,
   walletState,
+  rideAccessEnabled,
+  trialRidesRemaining,
+  accessRequestTelegram,
   onBack,
   onLogout,
   onOpenCards,
+  onRequestAccess,
 }: {
   phoneNumber: string;
   city: string;
   walletState: WalletState;
+  rideAccessEnabled: boolean;
+  trialRidesRemaining: number;
+  accessRequestTelegram: string;
   onBack: () => void;
   onLogout: () => void;
   onOpenCards: () => void;
+  onRequestAccess: () => void;
 }) {
+  const activeCard = getActiveCard(walletState);
+  const accessText = rideAccessEnabled
+    ? "Доступ к оплате проезда активен"
+    : trialRidesRemaining > 0
+      ? `Пробных поездок осталось: ${trialRidesRemaining}`
+      : "Пробные поездки закончились. Нужен доступ от администратора.";
+
   return (
     <View style={styles.overlayScreen}>
       <Header title="Настройки" onBack={onBack} />
       <View style={styles.settingsCard}>
         <Text style={styles.settingsPhone}>{phoneNumber}</Text>
         <Text style={styles.settingsCity}>{city}</Text>
-        <Text style={styles.settingsMeta}>Баланс: {formatBalance(walletState.balance)} ₸</Text>
+        <Text style={styles.settingsMeta}>Баланс кошелька: {formatBalance(walletState.balance)} ₸</Text>
+        <Text style={styles.settingsMeta}>
+          Активная карта: {activeCard ? maskCardNumber(activeCard.number) : "Не выбрана"}
+        </Text>
       </View>
+
+      <View style={styles.accessCard}>
+        <View style={styles.accessCardTop}>
+          <View
+            style={[
+              styles.accessDot,
+              { backgroundColor: rideAccessEnabled ? "#1FA868" : colors.accentYellow },
+            ]}
+          />
+          <Text style={styles.accessTitle}>Оплата проезда</Text>
+        </View>
+        <Text style={styles.accessBody}>{accessText}</Text>
+        {!rideAccessEnabled ? (
+          <>
+            <Text style={styles.accessHint}>
+              Для активации напишите в Telegram: {accessRequestTelegram || "@aqxrx"}
+            </Text>
+            <Pressable style={styles.accessButton} onPress={onRequestAccess}>
+              <Text style={styles.accessButtonText}>Запросить доступ</Text>
+            </Pressable>
+          </>
+        ) : null}
+      </View>
+
       <OverlayListRow
         item={{ id: "cards", title: "Мои карты", icon: "credit-card" }}
         color="#E7EDFF"
@@ -299,7 +339,9 @@ export function CardsScreen({
       <ScrollView showsVerticalScrollIndicator={false}>
         {walletState.cards.length === 0 ? (
           <View style={styles.emptyCardState}>
-            <Text style={styles.emptyCardText}>Пока нет добавленных карт. Добавьте первую карту ниже.</Text>
+            <Text style={styles.emptyCardText}>
+              Пока нет добавленных карт. Добавьте первую карту ниже.
+            </Text>
           </View>
         ) : (
           walletState.cards.map((card) => (
@@ -309,14 +351,15 @@ export function CardsScreen({
               onPress={() => onSetActiveCard(card.id)}
             >
               <View style={styles.savedCardIcon}>
-                <MaterialIcons name="credit-card" size={24} color={colors.primaryBlue} />
+                <MaterialIcons
+                  name={card.cardType === "transport" ? "directions-bus" : "credit-card"}
+                  size={24}
+                  color={colors.primaryBlue}
+                />
               </View>
               <View style={styles.savedCardCopy}>
                 <Text style={styles.savedCardTitle}>{card.holderName}</Text>
-                <Text style={styles.savedCardSubtitle}>
-                  {card.cardType === "transport" ? "Транспортная" : "Банковская"} •{" "}
-                  {maskCardNumber(card.number)}
-                </Text>
+                <Text style={styles.savedCardSubtitle}>{formatCardSubtitle(card)}</Text>
               </View>
               {activeCard?.id === card.id ? (
                 <MaterialIcons name="check-circle" size={24} color={colors.primaryBlue} />
@@ -325,6 +368,7 @@ export function CardsScreen({
           ))
         )}
 
+        <Text style={styles.formTitle}>Добавить карту</Text>
         <View style={styles.cardTypeRow}>
           <Pressable
             style={[styles.cardTypeChip, cardType === "bank" && styles.cardTypeChipActive]}
@@ -355,16 +399,22 @@ export function CardsScreen({
         <TextInput
           value={holderName}
           onChangeText={setHolderName}
-          placeholder="Название карты"
+          placeholder={cardType === "transport" ? "Название транспортной карты" : "Название карты"}
           placeholderTextColor={colors.textSecondary}
           style={styles.field}
         />
         <TextInput
           value={number}
           onChangeText={(value) =>
-            setNumber(value.replace(cardType === "transport" ? /[^0-9A-Za-z]/g : /\D/g, "").slice(0, 16))
+            setNumber(
+              value
+                .replace(cardType === "transport" ? /[^0-9A-Za-z]/g : /\D/g, "")
+                .slice(0, 16),
+            )
           }
-          placeholder={cardType === "transport" ? "Номер транспортной карты" : "Номер карты"}
+          placeholder={
+            cardType === "transport" ? "Номер транспортной карты" : "Номер банковской карты"
+          }
           placeholderTextColor={colors.textSecondary}
           keyboardType={cardType === "transport" ? "default" : "number-pad"}
           autoCapitalize="characters"
@@ -388,35 +438,84 @@ export function CardsScreen({
 
 export function TopUpScreen({
   balance,
+  activeCard,
   onBack,
   onTopUp,
 }: {
   balance: number;
+  activeCard: WalletCardData | null;
   onBack: () => void;
-  onTopUp: (amount: number) => void;
+  onTopUp: (amount: number, targetType: "wallet" | "transport") => void;
 }) {
   const [value, setValue] = React.useState("1000");
+  const [targetType, setTargetType] = React.useState<"wallet" | "transport">("wallet");
+  const canUseTransportTarget = activeCard?.cardType === "transport";
+  const numericValue = Number(value);
+
+  React.useEffect(() => {
+    if (!canUseTransportTarget && targetType === "transport") {
+      setTargetType("wallet");
+    }
+  }, [canUseTransportTarget, targetType]);
 
   return (
     <View style={styles.overlayScreen}>
-      <Header title="Пополнение баланса" onBack={onBack} />
+      <Header title="Пополнение" onBack={onBack} />
       <View style={styles.balanceBanner}>
-        <Text style={styles.balanceLabel}>Текущий баланс</Text>
-        <Text style={styles.balanceValue}>{formatBalance(balance)} ₸</Text>
+        <Text style={styles.balanceLabel}>
+          {targetType === "wallet" ? "Текущий баланс кошелька" : "Баланс транспортной карты"}
+        </Text>
+        <Text style={styles.balanceValue}>
+          {targetType === "wallet"
+            ? `${formatBalance(balance)} ₸`
+            : `${formatBalance(activeCard?.balance || 0)} ₸`}
+        </Text>
+        {targetType === "transport" && activeCard ? (
+          <Text style={styles.balanceHint}>
+            {activeCard.holderName} • {maskCardNumber(activeCard.number)}
+          </Text>
+        ) : null}
       </View>
+
+      <View style={styles.targetRow}>
+        <TargetChip
+          label="Кошелек"
+          selected={targetType === "wallet"}
+          onPress={() => setTargetType("wallet")}
+        />
+        <TargetChip
+          label="Транспортная карта"
+          selected={targetType === "transport"}
+          disabled={!canUseTransportTarget}
+          onPress={() => setTargetType("transport")}
+        />
+      </View>
+
+      {!canUseTransportTarget ? (
+        <Text style={styles.targetHint}>
+          Чтобы пополнить транспортную карту, сначала выберите активной транспортную карту.
+        </Text>
+      ) : null}
+
       <View style={styles.amountRow}>
         {[500, 1000, 2000, 5000].map((amount) => (
           <Pressable
             key={amount}
-            style={[styles.amountChip, Number(value) === amount && styles.amountChipActive]}
+            style={[styles.amountChip, numericValue === amount && styles.amountChipActive]}
             onPress={() => setValue(String(amount))}
           >
-            <Text style={[styles.amountChipText, Number(value) === amount && styles.amountChipTextActive]}>
+            <Text
+              style={[
+                styles.amountChipText,
+                numericValue === amount && styles.amountChipTextActive,
+              ]}
+            >
               {amount} ₸
             </Text>
           </Pressable>
         ))}
       </View>
+
       <TextInput
         value={value}
         onChangeText={(next) => setValue(next.replace(/[^0-9]/g, ""))}
@@ -425,8 +524,13 @@ export function TopUpScreen({
         keyboardType="number-pad"
         style={styles.field}
       />
+
       <View style={styles.bottomButtonWrap}>
-        <PrimaryButton label="Пополнить" disabled={!Number(value)} onPress={() => onTopUp(Number(value))} />
+        <PrimaryButton
+          label={targetType === "wallet" ? "Пополнить кошелек" : "Пополнить карту"}
+          disabled={!numericValue || (targetType === "transport" && !canUseTransportTarget)}
+          onPress={() => onTopUp(numericValue, targetType)}
+        />
       </View>
     </View>
   );
@@ -504,6 +608,39 @@ function TopTab({ label, selected = false }: { label: string; selected?: boolean
   );
 }
 
+function TargetChip({
+  label,
+  selected,
+  disabled = false,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={[
+        styles.targetChip,
+        selected && styles.targetChipSelected,
+        disabled && styles.targetChipDisabled,
+      ]}
+      onPress={disabled ? undefined : onPress}
+    >
+      <Text
+        style={[
+          styles.targetChipText,
+          selected && styles.targetChipTextSelected,
+          disabled && styles.targetChipTextDisabled,
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function PrimaryButton({
   label,
   disabled,
@@ -514,7 +651,10 @@ function PrimaryButton({
   onPress: () => void;
 }) {
   return (
-    <Pressable style={[styles.primaryButton, disabled && styles.primaryButtonDisabled]} onPress={disabled ? undefined : onPress}>
+    <Pressable
+      style={[styles.primaryButton, disabled && styles.primaryButtonDisabled]}
+      onPress={disabled ? undefined : onPress}
+    >
       <Text style={styles.primaryButtonLabel}>{label}</Text>
     </Pressable>
   );
@@ -531,21 +671,104 @@ function formatPhoneDigits(value: string) {
   return parts.join("-");
 }
 
+function formatLoginStatus(result: {
+  debugCode?: string;
+  deliveryStatus?: string;
+  supportTelegram?: string;
+}) {
+  const support = result.supportTelegram || "@aqxrx";
+  if (result.debugCode) {
+    return `Код отправлен в Telegram. Debug code: ${result.debugCode}`;
+  }
+  if (result.deliveryStatus === "chat-not-configured") {
+    return `Telegram не привязан. Напишите ${support}, затем запросите код повторно.`;
+  }
+  if (result.deliveryStatus === "bot-not-configured") {
+    return `Бот еще не настроен. Для доступа напишите ${support}.`;
+  }
+  return `Код отправлен в Telegram (${result.deliveryStatus || "pending"}).`;
+}
+
+function formatCardSubtitle(card: WalletCardData) {
+  const base = `${card.cardType === "transport" ? "Транспортная" : "Банковская"} • ${maskCardNumber(card.number)}`;
+  if (card.cardType === "transport") {
+    return `${base} • ${formatBalance(card.balance || 0)} ₸`;
+  }
+  return base;
+}
+
 const styles = StyleSheet.create({
-  overlayScreen: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 24, paddingBottom: 24 },
-  loginScreen: { minHeight: "100%", backgroundColor: "#FFFFFF", paddingHorizontal: 24, paddingTop: 16, paddingBottom: 28 },
+  overlayScreen: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  loginScreen: {
+    minHeight: "100%",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 28,
+  },
   skylineWrap: { height: 170, justifyContent: "flex-end", alignItems: "center" },
-  skyline: { position: "absolute", left: 0, right: 0, top: 10, bottom: 12, borderBottomLeftRadius: 32, borderBottomRightRadius: 32, backgroundColor: "#EFF2FC" },
-  busBadge: { width: 52, height: 52, borderRadius: 14, backgroundColor: colors.accentYellow, alignItems: "center", justifyContent: "center", ...shadow },
-  loginCard: { backgroundColor: "#FFFFFF", borderRadius: 30, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 18, ...shadow },
-  dragHandle: { alignSelf: "center", width: 78, height: 5, borderRadius: 999, backgroundColor: "#D7D7D7" },
+  skyline: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 10,
+    bottom: 12,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+    backgroundColor: "#EFF2FC",
+  },
+  busBadge: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: colors.accentYellow,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow,
+  },
+  loginCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 30,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 18,
+    ...shadow,
+  },
+  dragHandle: {
+    alignSelf: "center",
+    width: 78,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "#D7D7D7",
+  },
   loginTitle: { marginTop: 22, fontSize: 22, fontWeight: "700", color: colors.textPrimary },
   loginSubtitle: { marginTop: 8, fontSize: 16, color: colors.textSecondary },
   loginStatus: { marginTop: 12, fontSize: 14, lineHeight: 20, color: colors.textSecondary },
   loginError: { marginTop: 10, fontSize: 14, lineHeight: 20, color: "#C62828" },
-  phoneCard: { marginTop: 26, backgroundColor: "#FFFFFF", borderRadius: 24, paddingHorizontal: 16, paddingTop: 18, paddingBottom: 16, ...shadow },
+  phoneCard: {
+    marginTop: 26,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 16,
+    ...shadow,
+  },
   phoneCardTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
-  phoneInputWrap: { marginTop: 16, minHeight: 72, borderRadius: 20, backgroundColor: colors.surfaceMuted, paddingHorizontal: 16, flexDirection: "row", alignItems: "center" },
+  phoneInputWrap: {
+    marginTop: 16,
+    minHeight: 72,
+    borderRadius: 20,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+  },
   flag: { fontSize: 22 },
   countryCode: { marginLeft: 10, fontSize: 18, color: colors.textPrimary },
   inputDivider: { width: 1, height: 30, backgroundColor: "#3C3C3C", marginHorizontal: 16 },
@@ -556,11 +779,27 @@ const styles = StyleSheet.create({
   header: { height: 56, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   headerBack: { width: 40, alignItems: "flex-start", justifyContent: "center" },
   headerTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
-  searchField: { height: 72, marginTop: 6, marginBottom: 14, borderRadius: 18, backgroundColor: colors.surfaceMuted, paddingHorizontal: 18, flexDirection: "row", alignItems: "center" },
+  searchField: {
+    height: 72,
+    marginTop: 6,
+    marginBottom: 14,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 18,
+    flexDirection: "row",
+    alignItems: "center",
+  },
   searchInput: { flex: 1, marginLeft: 12, fontSize: 18, color: colors.textPrimary },
   cityRow: { minHeight: 72, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   cityText: { fontSize: 20, color: colors.textPrimary },
-  cityCheck: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primaryBlue, alignItems: "center", justifyContent: "center" },
+  cityCheck: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.primaryBlue,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   tabsRow: { flexDirection: "row", gap: 26, marginTop: 10, marginBottom: 12 },
   topTabWrap: { alignItems: "flex-start" },
   topTabLabel: { fontSize: 16, fontWeight: "500", color: colors.textSecondary },
@@ -568,35 +807,107 @@ const styles = StyleSheet.create({
   topTabLine: { width: 82, height: 4, marginTop: 10, borderRadius: 999, backgroundColor: "transparent" },
   topTabLineSelected: { backgroundColor: colors.primaryBlue },
   overlayRow: { flexDirection: "row", alignItems: "center", paddingVertical: 16 },
-  overlayIconCircle: { width: 54, height: 54, borderRadius: 27, alignItems: "center", justifyContent: "center" },
+  overlayIconCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   overlayRowTitle: { flex: 1, marginLeft: 14, fontSize: 17, color: colors.textPrimary },
   settingsCard: { marginTop: 20, borderRadius: 22, backgroundColor: colors.surfaceMuted, padding: 20 },
   settingsPhone: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
   settingsCity: { marginTop: 6, fontSize: 16, color: colors.textSecondary },
   settingsMeta: { marginTop: 10, fontSize: 15, color: colors.textSecondary },
+  accessCard: { marginTop: 16, marginBottom: 10, borderRadius: 22, backgroundColor: "#F3F6FF", padding: 18 },
+  accessCardTop: { flexDirection: "row", alignItems: "center" },
+  accessDot: { width: 10, height: 10, borderRadius: 5 },
+  accessTitle: { marginLeft: 10, fontSize: 16, fontWeight: "700", color: colors.textPrimary },
+  accessBody: { marginTop: 12, fontSize: 15, lineHeight: 22, color: colors.textPrimary },
+  accessHint: { marginTop: 10, fontSize: 14, lineHeight: 20, color: colors.textSecondary },
+  accessButton: {
+    marginTop: 14,
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: colors.primaryBlue,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  accessButtonText: { fontSize: 15, color: "#FFFFFF", fontWeight: "700" },
   emptyCardState: { padding: 20, borderRadius: 22, backgroundColor: colors.surfaceMuted, marginBottom: 14 },
   emptyCardText: { fontSize: 16, color: colors.textSecondary },
-  savedCard: { padding: 18, borderRadius: 22, backgroundColor: colors.surfaceMuted, flexDirection: "row", alignItems: "center", marginBottom: 14 },
-  savedCardActive: { borderWidth: 1, borderColor: colors.primaryBlue, backgroundColor: "rgba(36,87,245,0.08)" },
-  savedCardIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
+  savedCard: {
+    padding: 18,
+    borderRadius: 22,
+    backgroundColor: colors.surfaceMuted,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  savedCardActive: {
+    borderWidth: 1,
+    borderColor: colors.primaryBlue,
+    backgroundColor: "rgba(36,87,245,0.08)",
+  },
+  savedCardIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   savedCardCopy: { flex: 1, marginLeft: 12 },
   savedCardTitle: { fontSize: 16, fontWeight: "600", color: colors.textPrimary },
   savedCardSubtitle: { marginTop: 4, fontSize: 14, color: colors.textSecondary },
+  formTitle: { marginTop: 6, marginBottom: 12, fontSize: 18, fontWeight: "700", color: colors.textPrimary },
   cardTypeRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
   cardTypeChip: { flex: 1, paddingVertical: 12, borderRadius: 16, backgroundColor: "#F0F4FF", alignItems: "center" },
   cardTypeChipActive: { backgroundColor: "rgba(36,87,245,0.14)" },
   cardTypeText: { fontSize: 14, color: colors.textPrimary },
   cardTypeTextActive: { color: colors.primaryBlue, fontWeight: "700" },
-  field: { height: 60, borderRadius: 18, backgroundColor: colors.surfaceMuted, paddingHorizontal: 18, fontSize: 17, color: colors.textPrimary, marginTop: 14, marginBottom: 14 },
+  field: {
+    height: 60,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 18,
+    fontSize: 17,
+    color: colors.textPrimary,
+    marginTop: 14,
+    marginBottom: 14,
+  },
   balanceBanner: { marginTop: 20, borderRadius: 22, backgroundColor: colors.banner, padding: 20 },
   balanceLabel: { fontSize: 15, color: "#D7DCEC" },
   balanceValue: { marginTop: 8, fontSize: 24, fontWeight: "700", color: "#FFFFFF" },
+  balanceHint: { marginTop: 8, fontSize: 14, color: "#D7DCEC" },
+  targetRow: { flexDirection: "row", gap: 10, marginTop: 18 },
+  targetChip: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 16,
+    backgroundColor: "#F0F4FF",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
+  targetChipSelected: { backgroundColor: "rgba(36,87,245,0.14)" },
+  targetChipDisabled: { backgroundColor: "#F3F3F3" },
+  targetChipText: { fontSize: 14, color: colors.textPrimary, textAlign: "center" },
+  targetChipTextSelected: { color: colors.primaryBlue, fontWeight: "700" },
+  targetChipTextDisabled: { color: "#A7A7A7" },
+  targetHint: { marginTop: 12, fontSize: 14, lineHeight: 20, color: colors.textSecondary },
   amountRow: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 20, marginBottom: 20 },
   amountChip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999, backgroundColor: "#F0F4FF" },
   amountChipActive: { backgroundColor: "rgba(36,87,245,0.14)" },
   amountChipText: { fontSize: 15, color: colors.textPrimary },
   amountChipTextActive: { color: colors.primaryBlue },
-  primaryButton: { height: 64, borderRadius: 18, backgroundColor: colors.primaryBlue, alignItems: "center", justifyContent: "center" },
+  primaryButton: {
+    height: 64,
+    borderRadius: 18,
+    backgroundColor: colors.primaryBlue,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   primaryButtonDisabled: { backgroundColor: "#C8C8C8" },
   primaryButtonLabel: { fontSize: 18, color: "#FFFFFF" },
 });

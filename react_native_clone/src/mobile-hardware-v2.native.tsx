@@ -5,21 +5,32 @@ import { BleManager, type Device, State } from "react-native-ble-plx";
 import QRCode from "react-native-qrcode-svg";
 import { Modal, NativeModules, PermissionsAndroid, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { addBus, createTicket, getBuses, getCities, getTariffs, type BusDto, type TariffDto, type TicketDto } from "./api";
+import {
+  addBus,
+  createTicket,
+  getBuses,
+  getCities,
+  getTariffs,
+  type ApiRequestError,
+  type BusDto,
+  type TariffDto,
+  type TicketDto,
+} from "./api";
 import { colors, shadow } from "./theme";
-import { formatBalance } from "./wallet-store";
+import { formatBalance, type WalletCardData } from "./wallet-store";
 
 type HardwareProps = {
   phoneNumber: string;
   cityName: string;
   walletBalance: number;
+  activeTransportCard: WalletCardData | null;
   onBack: () => void;
   onPaid: (amount: number) => void;
 };
 
 type ValidatorItem = { id: string; label: string; raw: Device; bus: BusDto | null };
 type Stage = "scan" | "details" | "add";
-type PayMethod = "wallet" | "bank-card" | "kaspi";
+type PayMethod = "wallet" | "transport-card" | "bank-card" | "kaspi";
 
 const hasNativeBle = Boolean((NativeModules as Record<string, unknown>).BleClientManager);
 const colorsList = ["#2F7DF6", "#FF6D7A", "#55C271", "#B4C94D", "#A57A37", "#D1B77A"];
@@ -45,12 +56,16 @@ export function BluetoothScannerScreen(props: HardwareProps) {
         const city = cities.find((item) => item.name === props.cityName) ?? cities[0];
         const nextCityId = city?.id ?? "";
         const nextTariffs = nextCityId ? await getTariffs(nextCityId) : [];
-        if (!active) return;
+        if (!active) {
+          return;
+        }
         setCityId(nextCityId);
         setTariffs(nextTariffs);
         setTariffId(nextTariffs[0]?.id ?? "");
-      } catch {
-        if (active) setError("Не удалось загрузить тарифы");
+      } catch (nextError) {
+        if (active) {
+          setError(formatApiError(nextError, "Не удалось загрузить тарифы"));
+        }
       }
     })();
     return () => {
@@ -59,17 +74,21 @@ export function BluetoothScannerScreen(props: HardwareProps) {
   }, [props.cityName]);
 
   useEffect(() => {
-    if (!cityId) return;
+    if (!cityId) {
+      return;
+    }
     if (!hasNativeBle) {
       setLoading(false);
-      setError("BLE работает в dev build. В Expo Go недоступен.");
+      setError("BLE работает только в dev build. В Expo Go недоступен.");
       return;
     }
 
     let mounted = true;
     void (async () => {
       const granted = await requestBlePermissions();
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       if (!granted) {
         setLoading(false);
         setError("Нет доступа к Bluetooth");
@@ -85,13 +104,13 @@ export function BluetoothScannerScreen(props: HardwareProps) {
         const sub = manager.onStateChange((next) => {
           if (next === State.PoweredOn) {
             sub.remove();
-            startScan(manager, cityId, setValidators);
+            startScan(manager, cityId, setValidators, setError);
           }
         }, true);
         return;
       }
 
-      startScan(manager, cityId, setValidators);
+      startScan(manager, cityId, setValidators, setError);
     })();
 
     return () => {
@@ -111,40 +130,72 @@ export function BluetoothScannerScreen(props: HardwareProps) {
   }
 
   async function handleAddBus() {
-    if (!selected || !tariffId || !routeNumber.trim()) return;
-    const bus = await addBus({
-      cityId,
-      tariffId,
-      number: normalizeTransportValue(selected.label),
-      routeNumber: routeNumber.trim(),
-    });
-    const next = { ...selected, bus };
-    setSelected(next);
-    setValidators((current) => current.map((candidate) => (candidate.id === selected.id ? next : candidate)));
-    setStage("details");
+    if (!selected || !tariffId || !routeNumber.trim()) {
+      return;
+    }
+    try {
+      const bus = await addBus({
+        cityId,
+        tariffId,
+        number: normalizeTransportValue(selected.label),
+        routeNumber: routeNumber.trim(),
+      });
+      const next = { ...selected, bus };
+      setSelected(next);
+      setValidators((current) => current.map((candidate) => (candidate.id === selected.id ? next : candidate)));
+      setStage("details");
+      setError("");
+    } catch (nextError) {
+      setError(formatApiError(nextError, "Не удалось добавить автобус"));
+    }
   }
 
   async function handlePay(method: PayMethod) {
-    if (!selected?.bus) return;
+    if (!selected?.bus) {
+      return;
+    }
     if (method === "wallet" && props.walletBalance < selected.bus.price) {
       setError("Недостаточно баланса");
       return;
     }
-    const ticket = await createTicket({
-      phoneNumber: props.phoneNumber,
-      busId: selected.bus.id,
-      paymentMethod: method,
-      cityId,
-      cityName: props.cityName,
-    });
-    if (method === "wallet") props.onPaid(selected.bus.price);
-    setTicket(ticket);
+    if (method === "transport-card") {
+      if (!props.activeTransportCard) {
+        setError("Сначала выберите активную транспортную карту");
+        return;
+      }
+      if ((props.activeTransportCard.balance || 0) < selected.bus.price) {
+        setError("Недостаточно баланса на транспортной карте");
+        return;
+      }
+    }
+
+    try {
+      const created = await createTicket({
+        phoneNumber: props.phoneNumber,
+        busId: selected.bus.id,
+        paymentMethod: method,
+        cityId,
+        cityName: props.cityName,
+      });
+      props.onPaid(selected.bus.price);
+      setTicket(created);
+      setError("");
+    } catch (nextError) {
+      setError(formatApiError(nextError, "Не удалось провести оплату"));
+    }
   }
 
   const goBack = () => {
-    if (stage === "scan") props.onBack();
-    else setStage("scan");
+    if (stage === "scan") {
+      props.onBack();
+    } else {
+      setStage("scan");
+    }
   };
+
+  const transportSubtitle = props.activeTransportCard
+    ? `${props.activeTransportCard.holderName} • ${formatBalance(props.activeTransportCard.balance || 0)} ₸`
+    : "Сначала выберите активную транспортную карту";
 
   return (
     <View style={styles.screen}>
@@ -166,17 +217,20 @@ export function BluetoothScannerScreen(props: HardwareProps) {
                 </View>
               </Pressable>
             ))}
-            <Text style={styles.helper}>Өзіңіздікін таппадыңыз ба??</Text>
-            <Pressable style={styles.ghost} onPress={() => {
-              setValidators([]);
-              setSelected(null);
-              setStage("scan");
-              setError("");
-              if (managerRef.current && cityId) {
-                managerRef.current.stopDeviceScan();
-                startScan(managerRef.current, cityId, setValidators);
-              }
-            }}>
+            <Text style={styles.helper}>Өзіңіздікін таппадыңыз ба?</Text>
+            <Pressable
+              style={styles.ghost}
+              onPress={() => {
+                setValidators([]);
+                setSelected(null);
+                setStage("scan");
+                setError("");
+                if (managerRef.current && cityId) {
+                  managerRef.current.stopDeviceScan();
+                  startScan(managerRef.current, cityId, setValidators, setError);
+                }
+              }}
+            >
               <Text style={styles.ghostText}>Қайтадан іздеу</Text>
             </Pressable>
             {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -188,8 +242,8 @@ export function BluetoothScannerScreen(props: HardwareProps) {
         <ScrollView showsVerticalScrollIndicator={false}>
           <Empty text="Бұл құрылғы базаға тіркелмеген. Жаңа автобус қосыңыз." />
           <View style={styles.form}>
-            <Text style={styles.label}>Көлік нөмірі</Text>
-            <Text style={styles.value}>{normalizeTransportValue(selected.label)}</Text>
+            <Text style={styles.labelPlain}>Көлік нөмірі</Text>
+            <Text style={styles.valuePlain}>{normalizeTransportValue(selected.label)}</Text>
             <TextInput value={routeNumber} onChangeText={setRouteNumber} placeholder="Маршрут, мысалы №12" placeholderTextColor={colors.textSecondary} style={styles.field} />
             {tariffs.map((item) => (
               <Pressable key={item.id} style={[styles.tariffRow, item.id === tariffId && styles.tariffRowActive]} onPress={() => setTariffId(item.id)}>
@@ -207,6 +261,7 @@ export function BluetoothScannerScreen(props: HardwareProps) {
         <ScrollView showsVerticalScrollIndicator={false}>
           <SummaryCard bus={selected.bus} />
           <PaymentRow title="Әмиян" subtitle={`Баланс: ${formatBalance(props.walletBalance)} ₸`} icon="account-balance-wallet" iconColor={colors.primaryBlue} iconBg="#EEF3FF" onPress={() => void handlePay("wallet")} />
+          <PaymentRow title="Транспорт картасы" subtitle={transportSubtitle} icon="directions-bus" iconColor="#1FA868" iconBg="#E8FFF2" onPress={() => void handlePay("transport-card")} disabled={!props.activeTransportCard} />
           <PaymentRow title="Kaspi.kz" subtitle="MVP төлем тәсілі" icon="payments" iconColor="#EA3F34" iconBg="#FFF0EE" onPress={() => void handlePay("kaspi")} />
           <PaymentRow title="Банк картасымен" subtitle="Қосылған картамен төлеу" icon="credit-card" iconColor="#FFB800" iconBg="#FFF6D9" onPress={() => void handlePay("bank-card")} />
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -232,35 +287,59 @@ export function QrScannerPaymentScreen(props: HardwareProps) {
     void (async () => {
       const cities = await getCities();
       const city = cities.find((item) => item.name === props.cityName) ?? cities[0];
-      if (active) setCityId(city?.id ?? "");
-    })().catch(() => setError("Не удалось загрузить город"));
+      if (active) {
+        setCityId(city?.id ?? "");
+      }
+    })().catch((nextError) => setError(formatApiError(nextError, "Не удалось загрузить город")));
     return () => {
       active = false;
     };
   }, [props.cityName]);
 
   useEffect(() => {
-    if (permission && !permission.granted) void requestPermission();
+    if (permission && !permission.granted) {
+      void requestPermission();
+    }
   }, [permission, requestPermission]);
 
   async function handlePay(method: PayMethod) {
-    if (!bus) return;
+    if (!bus) {
+      return;
+    }
     if (method === "wallet" && props.walletBalance < bus.price) {
       setError("Недостаточно баланса");
       return;
     }
-    const ticket = await createTicket({
-      phoneNumber: props.phoneNumber,
-      busId: bus.id,
-      paymentMethod: method,
-      cityId,
-      cityName: props.cityName,
-    });
-    if (method === "wallet") props.onPaid(bus.price);
-    setTicket(ticket);
+    if (method === "transport-card") {
+      if (!props.activeTransportCard) {
+        setError("Сначала выберите активную транспортную карту");
+        return;
+      }
+      if ((props.activeTransportCard.balance || 0) < bus.price) {
+        setError("Недостаточно баланса на транспортной карте");
+        return;
+      }
+    }
+
+    try {
+      const created = await createTicket({
+        phoneNumber: props.phoneNumber,
+        busId: bus.id,
+        paymentMethod: method,
+        cityId,
+        cityName: props.cityName,
+      });
+      props.onPaid(bus.price);
+      setTicket(created);
+      setError("");
+    } catch (nextError) {
+      setError(formatApiError(nextError, "Не удалось провести оплату"));
+    }
   }
 
-  if (!permission) return <View style={styles.screen} />;
+  if (!permission) {
+    return <View style={styles.screen} />;
+  }
 
   if (!permission.granted) {
     return (
@@ -272,6 +351,10 @@ export function QrScannerPaymentScreen(props: HardwareProps) {
     );
   }
 
+  const transportSubtitle = props.activeTransportCard
+    ? `${props.activeTransportCard.holderName} • ${formatBalance(props.activeTransportCard.balance || 0)} ₸`
+    : "Сначала выберите активную транспортную карту";
+
   return (
     <View style={styles.scanner}>
       <CameraView
@@ -279,16 +362,19 @@ export function QrScannerPaymentScreen(props: HardwareProps) {
         facing="back"
         enableTorch={flash}
         onBarcodeScanned={async ({ data }) => {
-          if (scanned || !cityId) return;
+          if (scanned || !cityId) {
+            return;
+          }
           setScanned(true);
-          setError("");
           try {
             const byQr = await getBuses(cityId, { qrToken: data.trim() });
             const nextBus = byQr[0] ?? (await getBuses(cityId, { number: normalizeTransportValue(data) }))[0] ?? null;
             setBus(nextBus);
-            if (!nextBus) setError("QR бойынша автобус табылмады");
-          } catch {
-            setError("QR кодын оқу мүмкін болмады");
+            if (!nextBus) {
+              setError("QR бойынша автобус табылмады");
+            }
+          } catch (nextError) {
+            setError(formatApiError(nextError, "QR кодын оқу мүмкін болмады"));
           }
         }}
       />
@@ -305,9 +391,10 @@ export function QrScannerPaymentScreen(props: HardwareProps) {
             <View style={styles.sheet}>
               <SummaryCard bus={bus} compact />
               <PaymentRow title="Әмиян" subtitle={`Баланс: ${formatBalance(props.walletBalance)} ₸`} icon="account-balance-wallet" iconColor={colors.primaryBlue} iconBg="#EEF3FF" onPress={() => void handlePay("wallet")} />
+              <PaymentRow title="Транспорт картасы" subtitle={transportSubtitle} icon="directions-bus" iconColor="#1FA868" iconBg="#E8FFF2" onPress={() => void handlePay("transport-card")} disabled={!props.activeTransportCard} />
               <PaymentRow title="Kaspi.kz" subtitle="MVP төлем тәсілі" icon="payments" iconColor="#EA3F34" iconBg="#FFF0EE" onPress={() => void handlePay("kaspi")} />
               <PaymentRow title="Банк картасымен" subtitle="Қосылған картамен төлеу" icon="credit-card" iconColor="#FFB800" iconBg="#FFF6D9" onPress={() => void handlePay("bank-card")} />
-              <Pressable style={styles.ghost} onPress={() => { setScanned(false); setBus(null); setError(""); }}>
+              <Pressable style={styles.ghost} onPress={() => { setBus(null); setScanned(false); setError(""); }}>
                 <Text style={styles.ghostText}>Қайта сканерлеу</Text>
               </Pressable>
             </View>
@@ -328,20 +415,47 @@ async function findBus(cityId: string, label: string) {
   return buses.find((item) => normalizeTransportValue(item.number) === query || normalizeTransportValue(item.validatorName || "") === query) ?? buses[0] ?? null;
 }
 
-function startScan(manager: BleManager, cityId: string, setValidators: React.Dispatch<React.SetStateAction<ValidatorItem[]>>) {
-  manager.startDeviceScan(null, null, (error, device) => {
-    if (error || !device) return;
+function startScan(
+  manager: BleManager,
+  cityId: string,
+  setValidators: React.Dispatch<React.SetStateAction<ValidatorItem[]>>,
+  setError: React.Dispatch<React.SetStateAction<string>>,
+) {
+  manager.startDeviceScan(null, null, (scanError, device) => {
+    if (scanError) {
+      setError(scanError.message);
+      return;
+    }
+    if (!device) {
+      return;
+    }
+
     const label = device.localName || device.name || device.id;
-    if (!label) return;
-    setValidators((current) => current.some((item) => item.id === device.id) ? current : [{ id: device.id, label, raw: device, bus: null }, ...current].slice(0, 20));
-    void findBus(cityId, label).then((bus) => {
-      setValidators((current) => current.map((item) => item.id === device.id ? { ...item, bus } : item));
-    }).catch(() => {});
+    if (!label) {
+      return;
+    }
+
+    setValidators((current) => {
+      if (current.some((item) => item.id === device.id)) {
+        return current;
+      }
+      return [{ id: device.id, label, raw: device, bus: null }, ...current].slice(0, 20);
+    });
+
+    void findBus(cityId, label)
+      .then((bus) => {
+        setValidators((current) => current.map((item) => (item.id === device.id ? { ...item, bus } : item)));
+      })
+      .catch(() => {
+        // keep unresolved item in list
+      });
   });
 }
 
 async function requestBlePermissions() {
-  if (Platform.OS !== "android") return true;
+  if (Platform.OS !== "android") {
+    return true;
+  }
   if (Platform.Version >= 31) {
     const scan = (PermissionsAndroid.PERMISSIONS as Record<string, unknown>).BLUETOOTH_SCAN as string;
     const connect = (PermissionsAndroid.PERMISSIONS as Record<string, unknown>).BLUETOOTH_CONNECT as string;
@@ -357,42 +471,41 @@ function normalizeTransportValue(value: string) {
   return value.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
 }
 
+function formatApiError(error: unknown, fallback: string) {
+  const apiError = error as ApiRequestError | undefined;
+  if (apiError?.code === "ACCESS_REQUIRED") {
+    return `Доступ к оплате закрыт. Напишите ${apiError.supportTelegram || "@aqxrx"} для активации.`;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
 function Header({ title, onBack }: { title: string; onBack: () => void }) {
   return <View style={styles.header}><Pressable style={styles.headerBack} onPress={onBack}><MaterialIcons name="arrow-back-ios-new" size={28} color={colors.textPrimary} /></Pressable><Text style={styles.headerTitle}>{title}</Text><View style={styles.headerBack} /></View>;
 }
-
 function WalletBanner({ phoneNumber, balance }: { phoneNumber: string; balance: number }) {
-  return <View style={styles.wallet}><View style={styles.walletRow}><Text style={styles.walletTitle}>Әмиян</Text><Text style={styles.walletAmount}>{formatBalance(balance)} ₸</Text></View><Text style={styles.walletSubtitle}>{phoneNumber} • Стандартты тариф</Text></View>;
+  return <View style={styles.wallet}><View style={styles.walletRow}><Text style={styles.walletTitle}>Әмиян</Text><Text style={styles.walletAmount}>{formatBalance(balance)} ₸</Text></View><Text style={styles.walletSubtitle}>{phoneNumber} • Стандарт</Text></View>;
 }
-
 function SummaryCard({ bus, compact = false }: { bus: BusDto; compact?: boolean }) {
   return <View style={[styles.summary, compact && styles.summaryCompact]}><View style={styles.summaryBadge}><MaterialIcons name="directions-bus" size={22} color={colors.banner} /></View><LabelValue label="Көлік нөмірі" value={bus.number} /><LabelValue label="Маршрут" value={bus.routeNumber} /><LabelValue label="Тариф" value={bus.tariffName} /><LabelValue label="Қала" value={bus.cityName} /><LabelValue label="Жол жүру сомасы" value={`${bus.price} ₸`} strong /></View>;
 }
-
 function LabelValue({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return <View style={styles.labelBlock}><Text style={styles.label}>{label}</Text><Text style={[styles.valueText, strong && styles.valueStrong]}>{value}</Text></View>;
 }
-
-function PaymentRow({ title, subtitle, icon, iconColor, iconBg, onPress }: { title: string; subtitle: string; icon: string; iconColor: string; iconBg: string; onPress: () => void }) {
-  return <Pressable style={styles.payRow} onPress={onPress}><View style={[styles.payIcon, { backgroundColor: iconBg }]}><MaterialIcons name={icon as never} size={24} color={iconColor} /></View><View style={styles.payCopy}><Text style={styles.payTitle}>{title}</Text><Text style={styles.paySubtitle}>{subtitle}</Text></View><MaterialIcons name="chevron-right" size={28} color={colors.textSecondary} /></Pressable>;
+function PaymentRow({ title, subtitle, icon, iconColor, iconBg, onPress, disabled = false }: { title: string; subtitle: string; icon: string; iconColor: string; iconBg: string; onPress: () => void; disabled?: boolean }) {
+  return <Pressable style={[styles.payRow, disabled && styles.payRowDisabled]} onPress={disabled ? undefined : onPress}><View style={[styles.payIcon, { backgroundColor: iconBg }]}><MaterialIcons name={icon as never} size={24} color={iconColor} /></View><View style={styles.payCopy}><Text style={styles.payTitle}>{title}</Text><Text style={styles.paySubtitle}>{subtitle}</Text></View><MaterialIcons name="chevron-right" size={28} color={colors.textSecondary} /></Pressable>;
 }
-
 function Empty({ text }: { text: string }) {
   return <View style={styles.empty}><Text style={styles.emptyText}>{text}</Text></View>;
 }
-
 function PrimaryButton({ label, disabled, onPress }: { label: string; disabled: boolean; onPress: () => void }) {
   return <Pressable style={[styles.primary, disabled && styles.primaryDisabled]} onPress={disabled ? undefined : onPress}><Text style={styles.primaryText}>{label}</Text></Pressable>;
 }
-
 function RoundButton({ icon, onPress }: { icon: string; onPress: () => void }) {
   return <Pressable style={styles.round} onPress={onPress}><MaterialIcons name={icon as never} size={24} color="#FFF" /></Pressable>;
 }
-
 function TicketModal({ ticket, onClose }: { ticket: TicketDto | null; onClose: () => void }) {
   return <Modal visible={Boolean(ticket)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}>{ticket ? <View style={styles.modalCard}><Pressable style={styles.modalClose} onPress={onClose}><MaterialIcons name="close" size={20} color={colors.textSecondary} /></Pressable><Text style={styles.modalCaption}>Нөмір транспорта</Text><Text style={styles.modalNumber}>{ticket.busNumber}</Text><View style={styles.qrWrap}><QRCode value={ticket.qrValue} size={180} /></View><Text style={styles.modalTitle}>Менің билетім</Text><View style={styles.grid}><TicketStat label="Қала" value={ticket.cityName} /><TicketStat label="Төлем күні" value="Бүгін" /><TicketStat label="Маршрут" value={ticket.routeNumber} /><TicketStat label="Жол ақысы" value={`${ticket.amount} ₸`} /><TicketStat label="Тариф" value={ticket.tariffName} /><TicketStat label="Жарамды дейін" value={new Date(ticket.validUntil).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })} /></View></View> : null}</View></Modal>;
 }
-
 function TicketStat({ label, value }: { label: string; value: string }) {
   return <View style={styles.stat}><Text style={styles.statLabel}>{label}</Text><Text style={styles.statValue}>{value}</Text></View>;
 }
@@ -421,10 +534,8 @@ const styles = StyleSheet.create({
   empty: { marginTop: 18, borderRadius: 22, padding: 20, backgroundColor: colors.surfaceMuted },
   emptyText: { fontSize: 16, lineHeight: 22, color: colors.textSecondary },
   form: { marginTop: 18, borderRadius: 22, padding: 18, backgroundColor: colors.surfaceMuted },
-  label: { fontSize: 13, color: "#D7DCEC" },
-  valueText: { marginTop: 4, fontSize: 20, color: "#FFF" },
-  valueStrong: { fontSize: 28, fontWeight: "700" },
-  value: { marginTop: 4, fontSize: 22, fontWeight: "700", color: colors.textPrimary },
+  labelPlain: { fontSize: 13, color: colors.textSecondary },
+  valuePlain: { marginTop: 4, fontSize: 22, fontWeight: "700", color: colors.textPrimary },
   field: { height: 58, marginTop: 12, borderRadius: 16, backgroundColor: "#FFF", paddingHorizontal: 16, fontSize: 16, color: colors.textPrimary },
   tariffRow: { marginTop: 10, borderRadius: 16, backgroundColor: "#FFF", padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   tariffRowActive: { borderWidth: 1.5, borderColor: colors.primaryBlue },
@@ -437,7 +548,11 @@ const styles = StyleSheet.create({
   summaryCompact: { marginTop: 0 },
   summaryBadge: { position: "absolute", top: 16, right: 16, width: 46, height: 46, borderRadius: 23, backgroundColor: "#FFF", alignItems: "center", justifyContent: "center" },
   labelBlock: { marginTop: 10 },
+  label: { fontSize: 13, color: "#D7DCEC" },
+  valueText: { marginTop: 4, fontSize: 20, color: "#FFF" },
+  valueStrong: { fontSize: 28, fontWeight: "700" },
   payRow: { marginTop: 12, borderRadius: 18, padding: 14, backgroundColor: "#FFF", flexDirection: "row", alignItems: "center", ...shadow },
+  payRowDisabled: { opacity: 0.55 },
   payIcon: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center" },
   payCopy: { flex: 1, marginLeft: 12 },
   payTitle: { fontSize: 16, fontWeight: "600", color: colors.textPrimary },
