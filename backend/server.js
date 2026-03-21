@@ -28,6 +28,10 @@ const TELEGRAM_BOT_USERNAME = `${process.env.TELEGRAM_BOT_USERNAME || ""}`
   .trim();
 const TELEGRAM_CHAT_MAP = safeJsonObject(process.env.TELEGRAM_CHAT_MAP_JSON);
 const IS_PROD = process.env.NODE_ENV === "production";
+const TELEGRAM_POLLING = process.env.TELEGRAM_POLLING === "true";
+
+let telegramPollingOffset = 0;
+let telegramPollingStarted = false;
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -812,6 +816,177 @@ async function storeTelegramDelivery(client, delivery) {
   );
 }
 
+async function handleTelegramUpdate(update) {
+  const message = update?.message || update?.edited_message;
+  const chatId = message?.chat?.id != null ? `${message.chat.id}` : "";
+  const text = typeof message?.text === "string" ? message.text.trim() : "";
+  const token = parseTelegramStartToken(text);
+
+  if (!chatId || !text.startsWith("/start")) {
+    return { ok: true, ignored: true };
+  }
+
+  const result = await transaction(async (client) => {
+    if (!token) {
+      return {
+        phoneNumber: "",
+        replyText: "Open Avtobys, request a Telegram bind link, then send the /start token here.",
+      };
+    }
+
+    const bindToken = await maybeOne(
+      `
+      SELECT *
+      FROM telegram_bind_tokens
+      WHERE token = $1
+        AND status = 'pending'
+        AND expires_at > $2
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [token, nowIso()],
+      client,
+    );
+
+    if (!bindToken) {
+      return {
+        phoneNumber: "",
+        replyText: "Bind token is invalid or expired. Request a new Telegram link in Avtobys.",
+      };
+    }
+
+    const user = await maybeOne("SELECT * FROM users WHERE id = $1", [bindToken.user_id], client);
+    if (!user) {
+      return {
+        phoneNumber: bindToken.phone_number || "",
+        replyText: "Account was not found. Request a new Telegram link in Avtobys.",
+      };
+    }
+
+    await client.query(
+      `
+      UPDATE users
+      SET telegram_chat_id = $2,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      `,
+      [user.id, chatId],
+    );
+    await client.query(
+      `
+      UPDATE telegram_bind_tokens
+      SET status = 'used',
+          chat_id = $2,
+          used_at = $3
+      WHERE id = $1
+      `,
+      [bindToken.id, chatId, nowIso()],
+    );
+    await client.query(
+      `
+      UPDATE telegram_bind_tokens
+      SET status = 'expired'
+      WHERE user_id = $1
+        AND status = 'pending'
+        AND id <> $2
+      `,
+      [user.id, bindToken.id],
+    );
+    await createNotification(
+      client,
+      user.id,
+      "Telegram connected",
+      "Login codes will now be delivered to your Telegram chat.",
+      "system",
+    );
+
+    return {
+      phoneNumber: bindToken.phone_number || user.phone_number || "",
+      replyText: `Telegram is connected to ${bindToken.phone_number || user.phone_number}. New login codes will arrive in this chat.`,
+    };
+  });
+
+  const delivery = await sendTelegramMessage(chatId, result.replyText);
+  await withClient((client) =>
+    storeTelegramDelivery(client, {
+      id: id("delivery"),
+      phoneNumber: result.phoneNumber,
+      chatId,
+      status: delivery.status,
+      messageText: result.replyText,
+      responseBody: delivery.responseBody || "",
+      error: delivery.error || "",
+      createdAt: nowIso(),
+    }),
+  );
+
+  return { ok: true, ignored: false, status: delivery.status };
+}
+
+async function pollTelegramUpdatesOnce() {
+  if (!TELEGRAM_BOT_TOKEN || typeof fetch !== "function") {
+    return;
+  }
+
+  try {
+    const query = new URLSearchParams({
+      timeout: "25",
+    });
+    if (telegramPollingOffset > 0) {
+      query.set("offset", `${telegramPollingOffset}`);
+    }
+
+    const response = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?${query.toString()}`,
+    );
+    const responseText = await response.text();
+    if (!response.ok) {
+      console.error("Telegram polling HTTP error", response.status, responseText);
+      return;
+    }
+
+    const payload = safeJsonParse(responseText, {});
+    const updates = Array.isArray(payload.result) ? payload.result : [];
+    for (const update of updates) {
+      if (typeof update?.update_id === "number") {
+        telegramPollingOffset = Math.max(telegramPollingOffset, update.update_id + 1);
+      }
+      await handleTelegramUpdate(update);
+    }
+  } catch (error) {
+    console.error("Telegram polling failed", error);
+  }
+}
+
+function scheduleTelegramPolling(delayMs = 0) {
+  if (!telegramPollingStarted) {
+    return;
+  }
+
+  setTimeout(async () => {
+    if (!telegramPollingStarted) {
+      return;
+    }
+    await pollTelegramUpdatesOnce();
+    scheduleTelegramPolling(1000);
+  }, delayMs);
+}
+
+function startTelegramPolling() {
+  if (!TELEGRAM_POLLING || telegramPollingStarted) {
+    return;
+  }
+
+  if (!TELEGRAM_BOT_TOKEN || typeof fetch !== "function") {
+    console.warn("Telegram polling requested but bot token/fetch is unavailable.");
+    return;
+  }
+
+  telegramPollingStarted = true;
+  console.log("Telegram polling enabled. Webhook is not required.");
+  scheduleTelegramPolling();
+}
+
 async function getSummary(client) {
   const [
     cities,
@@ -1037,112 +1212,7 @@ app.post("/api/telegram/bind-token", async (req, res) => {
 
 app.post("/api/telegram/webhook", async (req, res) => {
   try {
-    const message = req.body?.message || req.body?.edited_message;
-    const chatId = message?.chat?.id != null ? `${message.chat.id}` : "";
-    const text = typeof message?.text === "string" ? message.text.trim() : "";
-    const token = parseTelegramStartToken(text);
-
-    if (!chatId || !text.startsWith("/start")) {
-      res.json({ ok: true });
-      return;
-    }
-
-    const result = await transaction(async (client) => {
-      if (!token) {
-        return {
-          phoneNumber: "",
-          replyText: "Open Avtobys, request a Telegram bind link, then send the /start token here.",
-        };
-      }
-
-      const bindToken = await maybeOne(
-        `
-        SELECT *
-        FROM telegram_bind_tokens
-        WHERE token = $1
-          AND status = 'pending'
-          AND expires_at > $2
-        ORDER BY created_at DESC
-        LIMIT 1
-        `,
-        [token, nowIso()],
-        client,
-      );
-
-      if (!bindToken) {
-        return {
-          phoneNumber: "",
-          replyText: "Bind token is invalid or expired. Request a new Telegram link in Avtobys.",
-        };
-      }
-
-      const user = await maybeOne("SELECT * FROM users WHERE id = $1", [bindToken.user_id], client);
-      if (!user) {
-        return {
-          phoneNumber: bindToken.phone_number || "",
-          replyText: "Account was not found. Request a new Telegram link in Avtobys.",
-        };
-      }
-
-      await client.query(
-        `
-        UPDATE users
-        SET telegram_chat_id = $2,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $1
-        `,
-        [user.id, chatId],
-      );
-      await client.query(
-        `
-        UPDATE telegram_bind_tokens
-        SET status = 'used',
-            chat_id = $2,
-            used_at = $3
-        WHERE id = $1
-        `,
-        [bindToken.id, chatId, nowIso()],
-      );
-      await client.query(
-        `
-        UPDATE telegram_bind_tokens
-        SET status = 'expired'
-        WHERE user_id = $1
-          AND status = 'pending'
-          AND id <> $2
-        `,
-        [user.id, bindToken.id],
-      );
-      await createNotification(
-        client,
-        user.id,
-        "Telegram connected",
-        "Login codes will now be delivered to your Telegram chat.",
-        "system",
-      );
-
-      return {
-        phoneNumber: bindToken.phone_number || user.phone_number || "",
-        replyText: `Telegram is connected to ${bindToken.phone_number || user.phone_number}. New login codes will arrive in this chat.`,
-      };
-    });
-
-    if (chatId) {
-      const delivery = await sendTelegramMessage(chatId, result.replyText);
-      await withClient((client) =>
-        storeTelegramDelivery(client, {
-          id: id("delivery"),
-          phoneNumber: result.phoneNumber,
-          chatId,
-          status: delivery.status,
-          messageText: result.replyText,
-          responseBody: delivery.responseBody || "",
-          error: delivery.error || "",
-          createdAt: nowIso(),
-        }),
-      );
-    }
-
+    await handleTelegramUpdate(req.body);
     res.json({ ok: true });
   } catch (error) {
     console.error("Telegram webhook failed", error);
@@ -2948,6 +3018,7 @@ async function startServer() {
   await initDatabase({ adminToken: DEFAULT_ADMIN_TOKEN });
   app.listen(PORT, () => {
     console.log(`Avtobys backend listening on http://localhost:${PORT}`);
+    startTelegramPolling();
   });
 }
 

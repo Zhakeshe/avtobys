@@ -71,6 +71,30 @@ pm2 start server.js --name avtobys-api --update-env --time
 pm2 save
 ```
 
+Telegram bot via HTTPS webhook:
+
+```bash
+cd /var/www/avtobys/backend
+DATABASE_URL='postgresql://USER:PASSWORD@127.0.0.1:5433/avtobys' DATABASE_SSL=false ADMIN_TOKEN='your_admin_token' TELEGRAM_BOT_TOKEN='YOUR_BOT_TOKEN' TELEGRAM_BOT_USERNAME='your_bot_username' NODE_ENV=production PORT=4000 pm2 restart avtobys-api --update-env
+curl "https://api.telegram.org/botYOUR_BOT_TOKEN/setWebhook?url=https://YOUR_DOMAIN/api/telegram/webhook"
+```
+
+Telegram bot with plain HTTP server:
+
+- Telegram webhook will not work on plain `http`.
+- Use polling mode instead, then public HTTPS is not required for the bot.
+
+```bash
+cd /var/www/avtobys/backend
+DATABASE_URL='postgresql://USER:PASSWORD@127.0.0.1:5433/avtobys' DATABASE_SSL=false ADMIN_TOKEN='your_admin_token' TELEGRAM_BOT_TOKEN='YOUR_BOT_TOKEN' TELEGRAM_BOT_USERNAME='your_bot_username' TELEGRAM_POLLING=true NODE_ENV=production PORT=4000 pm2 restart avtobys-api --update-env
+```
+
+Notes:
+
+- `TELEGRAM_BOT_USERNAME` should be without `@`
+- if BotFather username is `avtobyskzzbot`, set exactly `avtobyskzzbot`
+- do not add a trailing `.`
+
 Flutter web build on VPS:
 
 ```bash
