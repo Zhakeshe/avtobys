@@ -707,6 +707,31 @@ async function createTelegramBindToken(client, user) {
   return serializeTelegramBindToken(bindToken);
 }
 
+async function getTelegramBindStatus(client, phoneNumber) {
+  const normalizedPhone = normalizePhoneNumber(phoneNumber);
+  if (!normalizedPhone) {
+    return {
+      phoneNumber: "",
+      isBound: false,
+      telegramChatId: "",
+      botUsername: TELEGRAM_BOT_USERNAME ? `@${TELEGRAM_BOT_USERNAME}` : "",
+    };
+  }
+
+  const user = await maybeOne(
+    "SELECT phone_number, telegram_chat_id FROM users WHERE phone_number = $1",
+    [normalizedPhone],
+    client,
+  );
+
+  return {
+    phoneNumber: normalizedPhone,
+    isBound: Boolean(user?.telegram_chat_id),
+    telegramChatId: user?.telegram_chat_id || "",
+    botUsername: TELEGRAM_BOT_USERNAME ? `@${TELEGRAM_BOT_USERNAME}` : "",
+  };
+}
+
 function parseTelegramStartToken(text) {
   const match = `${text || ""}`.trim().match(/^\/start(?:@\w+)?(?:\s+(.+))?$/i);
   return match?.[1]?.trim() || "";
@@ -899,6 +924,7 @@ async function handleTelegramUpdate(update) {
       "Login codes will now be delivered to your Telegram chat.",
       "system",
     );
+    console.log(`Telegram chat bound for ${bindToken.phone_number || user.phone_number} -> ${chatId}`);
 
     return {
       phoneNumber: bindToken.phone_number || user.phone_number || "",
@@ -1206,6 +1232,22 @@ app.post("/api/telegram/bind-token", async (req, res) => {
   } catch (error) {
     res.status(400).json({
       message: error instanceof Error ? error.message : "Failed to create Telegram bind token",
+    });
+  }
+});
+
+app.get("/api/telegram/bind-status", async (req, res) => {
+  try {
+    const payload = await withClient(async (client) => {
+      const sessionContext = await getSessionContext(req, client);
+      const phoneNumber = sessionContext?.user?.phone_number || normalizePhoneNumber(req.query.phone);
+      return getTelegramBindStatus(client, phoneNumber);
+    });
+
+    res.json(payload);
+  } catch (error) {
+    res.status(400).json({
+      message: error instanceof Error ? error.message : "Failed to load Telegram bind status",
     });
   }
 });

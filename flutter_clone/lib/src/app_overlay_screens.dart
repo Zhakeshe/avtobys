@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -25,6 +27,9 @@ typedef AuthCodeRequestCallback = Future<AuthCodeRequestDto> Function(
 typedef AuthCodeVerifyCallback = Future<void> Function(
   String phoneNumber,
   String code,
+);
+typedef CheckTelegramBindCallback = Future<TelegramBindStatusDto> Function(
+  String phoneNumber,
 );
 typedef RequestRideAccessCallback = Future<String> Function();
 typedef RequestTelegramBindCallback = Future<TelegramBindDto> Function();
@@ -260,12 +265,14 @@ class LoginEntryScreen extends StatefulWidget {
     super.key,
     required this.onRequestCode,
     required this.onVerifyCode,
+    required this.onCheckTelegramBind,
     required this.supportTelegram,
     this.initialPhoneNumber,
   });
 
   final AuthCodeRequestCallback onRequestCode;
   final AuthCodeVerifyCallback onVerifyCode;
+  final CheckTelegramBindCallback onCheckTelegramBind;
   final String supportTelegram;
   final String? initialPhoneNumber;
 
@@ -279,9 +286,11 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
   bool _requesting = false;
   bool _verifying = false;
   bool _awaitingCode = false;
+  bool _checkingBind = false;
   String _error = '';
   String? _debugCode;
   TelegramBindDto? _telegramBind;
+  Timer? _bindTimer;
 
   String get _digits => _phoneController.text.replaceAll(RegExp(r'\D'), '');
   bool get _canRequestCode => _digits.length >= 10;
@@ -311,9 +320,23 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
 
   @override
   void dispose() {
+    _bindTimer?.cancel();
     _phoneController.dispose();
     _codeController.dispose();
     super.dispose();
+  }
+
+  void _startBindPolling() {
+    _bindTimer?.cancel();
+    _bindTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _checkTelegramBind();
+    });
+    _checkTelegramBind();
+  }
+
+  void _stopBindPolling() {
+    _bindTimer?.cancel();
+    _bindTimer = null;
   }
 
   Future<void> _requestCode() async {
@@ -341,6 +364,11 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
         _telegramBind = response.telegramBind;
         _codeController.clear();
       });
+      if (response.telegramBind != null) {
+        _startBindPolling();
+      } else {
+        _stopBindPolling();
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -349,6 +377,30 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
         _requesting = false;
         _error = error.toString();
       });
+    }
+  }
+
+  Future<void> _checkTelegramBind() async {
+    if (_checkingBind || _telegramBind == null || _requesting || _digits.length < 10) {
+      return;
+    }
+    _checkingBind = true;
+    try {
+      final status = await widget.onCheckTelegramBind(_phoneNumber);
+      if (!mounted || !status.isBound) {
+        return;
+      }
+
+      _stopBindPolling();
+      setState(() {
+        _telegramBind = null;
+        _error = '';
+      });
+      await _requestCode();
+    } catch (_) {
+      // Keep polling silently while the user is on the bind screen.
+    } finally {
+      _checkingBind = false;
     }
   }
 

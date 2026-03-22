@@ -288,6 +288,29 @@ class TelegramBindDto {
   }
 }
 
+class TelegramBindStatusDto {
+  const TelegramBindStatusDto({
+    required this.phoneNumber,
+    required this.isBound,
+    required this.telegramChatId,
+    required this.botUsername,
+  });
+
+  final String phoneNumber;
+  final bool isBound;
+  final String telegramChatId;
+  final String botUsername;
+
+  factory TelegramBindStatusDto.fromJson(Map<String, dynamic> json) {
+    return TelegramBindStatusDto(
+      phoneNumber: json['phoneNumber'] as String? ?? '',
+      isBound: json['isBound'] as bool? ?? false,
+      telegramChatId: json['telegramChatId'] as String? ?? '',
+      botUsername: json['botUsername'] as String? ?? '',
+    );
+  }
+}
+
 class AuthCodeRequestDto {
   const AuthCodeRequestDto({
     required this.ok,
@@ -502,6 +525,16 @@ class TransportApi {
       omitAuth: phoneNumber != null && phoneNumber.isNotEmpty,
     );
     return TelegramBindDto.fromJson(response);
+  }
+
+  static Future<TelegramBindStatusDto> getTelegramBindStatus({
+    required String phoneNumber,
+  }) async {
+    final response = await _requestObject(
+      '/telegram/bind-status${phoneNumber.isNotEmpty ? '?phone=${Uri.encodeQueryComponent(phoneNumber)}' : ''}',
+      omitAuth: phoneNumber.isNotEmpty,
+    );
+    return TelegramBindStatusDto.fromJson(response);
   }
 
   static Future<RideAccessRequestDto> requestRideAccess({

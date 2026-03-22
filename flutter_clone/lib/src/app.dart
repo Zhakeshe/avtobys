@@ -329,6 +329,10 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     return TransportApi.createTelegramBindToken(cityName: _currentCity);
   }
 
+  Future<TelegramBindStatusDto> _checkTelegramBind(String phoneNumber) {
+    return TransportApi.getTelegramBindStatus(phoneNumber: phoneNumber);
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -443,6 +447,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
         return LoginEntryScreen(
           onRequestCode: _requestCode,
           onVerifyCode: _verifyCode,
+          onCheckTelegramBind: _checkTelegramBind,
           supportTelegram: _config.accessRequestTelegram,
           initialPhoneNumber: _phoneNumber,
         );
