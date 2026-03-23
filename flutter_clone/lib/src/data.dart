@@ -15,10 +15,7 @@ class MenuItemData {
 }
 
 class RouteItemData {
-  const RouteItemData({
-    required this.title,
-    required this.subtitle,
-  });
+  const RouteItemData({required this.title, required this.subtitle});
 
   final String title;
   final String subtitle;
@@ -51,30 +48,21 @@ class ServiceItemData {
 }
 
 class PromoCardData {
-  const PromoCardData({
-    required this.title,
-    required this.background,
-    required this.icon,
-  });
+  const PromoCardData({required this.title, required this.image});
 
   final String title;
-  final Color background;
-  final IconData icon;
+  final String image;
 }
 
 class OfferCardData {
-  const OfferCardData({
-    required this.image,
-  });
+  const OfferCardData({required this.title, required this.image});
 
+  final String title;
   final String image;
 }
 
 class PaymentCategoryData {
-  const PaymentCategoryData({
-    required this.title,
-    required this.icon,
-  });
+  const PaymentCategoryData({required this.title, required this.icon});
 
   final String title;
   final IconData icon;
@@ -157,34 +145,16 @@ const notificationItems = [
 ];
 
 const routeItems = [
-  RouteItemData(
-    title: 'Маршрут 1',
-    subtitle: 'Воинская часть - Автоцон',
-  ),
-  RouteItemData(
-    title: 'Маршрут 1М',
-    subtitle: 'Больница - Коз',
-  ),
-  RouteItemData(
-    title: 'Маршрут 1ONDY',
-    subtitle: 'Автостанция - Онды',
-  ),
+  RouteItemData(title: 'Маршрут 1', subtitle: 'Воинская часть - Автоцон'),
+  RouteItemData(title: 'Маршрут 1М', subtitle: 'Больница - Коз'),
+  RouteItemData(title: 'Маршрут 1ONDY', subtitle: 'Автостанция - Онды'),
   RouteItemData(
     title: 'Маршрут 2',
     subtitle: '15-й микрорайон д.35 - Сары базар',
   ),
-  RouteItemData(
-    title: 'Маршрут 2М',
-    subtitle: 'Больница - Косбулак',
-  ),
-  RouteItemData(
-    title: 'Маршрут 2USHTAGAN',
-    subtitle: 'Шетпе - Уштаган',
-  ),
-  RouteItemData(
-    title: 'Маршрут 3М',
-    subtitle: 'Больница - ЖД Вокзал',
-  ),
+  RouteItemData(title: 'Маршрут 2М', subtitle: 'Больница - Косбулак'),
+  RouteItemData(title: 'Маршрут 2USHTAGAN', subtitle: 'Шетпе - Уштаган'),
+  RouteItemData(title: 'Маршрут 3М', subtitle: 'Больница - ЖД Вокзал'),
   RouteItemData(
     title: 'Маршрут 3А',
     subtitle: '34-й микрорайон д.15 - Воинская часть',
@@ -192,11 +162,7 @@ const routeItems = [
 ];
 
 const quickActions = [
-  QuickActionData(
-    id: 'qr',
-    title: 'QR',
-    icon: Icons.qr_code_2_rounded,
-  ),
+  QuickActionData(id: 'qr', title: 'QR', icon: Icons.qr_code_2_rounded),
   QuickActionData(
     id: 'bluetooth',
     title: 'Bluetooth',
@@ -239,22 +205,35 @@ const serviceItems = [
 const promoCards = [
   PromoCardData(
     title: 'Виртуальный\nльготный тариф',
-    background: Color(0xFFFABE0C),
-    icon: Icons.verified_user_outlined,
+    image: 'assets/banners/banner_yellow.png',
   ),
   PromoCardData(
     title: 'История\nкошелька',
-    background: Color(0xFF87C63D),
-    icon: Icons.history_rounded,
+    image: 'assets/banners/banner_green.png',
+  ),
+  PromoCardData(
+    title: 'Следите за\nмаршрутом',
+    image: 'assets/banners/banner_orange.png',
+  ),
+  PromoCardData(
+    title: 'Оплачивайте сотни\nуслуг',
+    image: 'assets/banners/banner_red.png',
+  ),
+  PromoCardData(
+    title: 'Будьте в курсе\nновостей',
+    image: 'assets/banners/banner_telegram.png',
   ),
 ];
 
 const offerCards = [
-  OfferCardData(image: 'assets/banners/banner_pink.png'),
-  OfferCardData(image: 'assets/banners/banner_violet.png'),
-  OfferCardData(image: 'assets/banners/banner_red.png'),
-  OfferCardData(image: 'assets/banners/banner_green.png'),
-  OfferCardData(image: 'assets/banners/banner_yellow.png'),
+  OfferCardData(
+    title: 'Оплачивайте\nмобильную связь',
+    image: 'assets/banners/banner_pink.png',
+  ),
+  OfferCardData(
+    title: 'Пополняйте игровые\nаккаунты',
+    image: 'assets/banners/banner_violet.png',
+  ),
 ];
 
 const paymentCategories = [
@@ -286,14 +265,8 @@ const paymentCategories = [
     title: 'Реклама, маркеты, объявления',
     icon: Icons.campaign_outlined,
   ),
-  PaymentCategoryData(
-    title: 'Красота и здоровье',
-    icon: Icons.spa_outlined,
-  ),
-  PaymentCategoryData(
-    title: 'Прочие услуги',
-    icon: Icons.more_horiz_rounded,
-  ),
+  PaymentCategoryData(title: 'Красота и здоровье', icon: Icons.spa_outlined),
+  PaymentCategoryData(title: 'Прочие услуги', icon: Icons.more_horiz_rounded),
 ];
 
 const transferOptions = [

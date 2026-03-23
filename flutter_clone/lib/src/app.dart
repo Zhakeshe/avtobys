@@ -270,7 +270,11 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     });
   }
 
-  Future<void> _addCard(String holderName, String number, String cardType) async {
+  Future<void> _addCard(
+    String holderName,
+    String number,
+    String cardType,
+  ) async {
     await TransportApi.addWalletCard(
       holderName: holderName,
       number: number,
@@ -366,7 +370,8 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
         cityName: _currentCity,
         walletState: _walletState,
         rideAccessEnabled: _user?.rideAccessEnabled ?? false,
-        trialRidesRemaining: _user?.trialRidesRemaining ?? _config.trialRideCount,
+        trialRidesRemaining:
+            _user?.trialRidesRemaining ?? _config.trialRideCount,
         accessTelegram: _config.accessRequestTelegram,
         onBack: () => _selectTab(_lastContentTab),
         onSessionRefresh: _refreshSession,
@@ -377,7 +382,9 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          Positioned.fill(child: SafeArea(bottom: false, child: _buildScreen())),
+          Positioned.fill(
+            child: SafeArea(bottom: false, child: _buildScreen()),
+          ),
           Align(
             alignment: Alignment.bottomCenter,
             child: BottomTabBar(
@@ -393,14 +400,15 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
 
   Widget _buildScreen() {
     final city = _currentCity;
-    final phoneNumber =
-        _phoneNumber.isNotEmpty ? _phoneNumber : '+7 700-255-56-19';
+    final phoneNumber = _phoneNumber.isNotEmpty
+        ? _phoneNumber
+        : '+7 700-255-56-19';
     final activeCard = _walletState.activeCard;
     final cardSubtitle = activeCard == null
         ? 'Добавить карту'
         : activeCard.isTransport
-            ? 'Транспортная ${activeCard.maskedNumber}'
-            : activeCard.maskedNumber;
+        ? 'Транспортная ${activeCard.maskedNumber}'
+        : activeCard.maskedNumber;
 
     switch (_selectedTab) {
       case RootTab.home:
@@ -439,8 +447,9 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
 
   Widget _buildOverlayScreen() {
     final city = _currentCity;
-    final phoneNumber =
-        _phoneNumber.isNotEmpty ? _phoneNumber : '+7 700-255-56-19';
+    final phoneNumber = _phoneNumber.isNotEmpty
+        ? _phoneNumber
+        : '+7 700-255-56-19';
 
     switch (_overlay!) {
       case AppOverlay.login:
@@ -475,7 +484,8 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
           cityName: city,
           walletState: _walletState,
           rideAccessEnabled: _user?.rideAccessEnabled ?? false,
-          trialRidesRemaining: _user?.trialRidesRemaining ?? _config.trialRideCount,
+          trialRidesRemaining:
+              _user?.trialRidesRemaining ?? _config.trialRideCount,
           accessTelegram: _config.accessRequestTelegram,
           onBack: _closeOverlay,
           onSessionRefresh: _refreshSession,
@@ -487,7 +497,8 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
           cityName: city,
           walletState: _walletState,
           rideAccessEnabled: _user?.rideAccessEnabled ?? false,
-          trialRidesRemaining: _user?.trialRidesRemaining ?? _config.trialRideCount,
+          trialRidesRemaining:
+              _user?.trialRidesRemaining ?? _config.trialRideCount,
           accessTelegram: _config.accessRequestTelegram,
           onBack: _closeOverlay,
           onSessionRefresh: _refreshSession,
@@ -500,7 +511,8 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
           city: city,
           walletState: _walletState,
           rideAccessEnabled: _user?.rideAccessEnabled ?? false,
-          trialRidesRemaining: _user?.trialRidesRemaining ?? _config.trialRideCount,
+          trialRidesRemaining:
+              _user?.trialRidesRemaining ?? _config.trialRideCount,
           accessTelegram: _config.accessRequestTelegram,
           telegramChatId: _user?.telegramChatId ?? '',
           telegramBotUsername: _config.telegramBotUsername,
@@ -557,6 +569,14 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final contentWidth = MediaQuery.sizeOf(context).width - 40;
+    final promoCardWidth = (contentWidth * 0.74).clamp(250.0, 320.0).toDouble();
+    final offerCardWidth = ((contentWidth - 12) / 2)
+        .clamp(170.0, 240.0)
+        .toDouble();
+    const offerImageAspectRatio = 400 / 240;
+    final offerCardHeight = offerCardWidth / offerImageAspectRatio;
+
     return ColoredBox(
       color: AppColors.background,
       child: SingleChildScrollView(
@@ -585,38 +605,64 @@ class HomeScreen extends StatelessWidget {
               onOpenTickets: onOpenTickets,
             ),
             const SizedBox(height: 28),
-            SizedBox(
-              height: 100,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                clipBehavior: Clip.none,
-                itemCount: promoCards.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 12),
-                itemBuilder: (context, index) => SizedBox(
-                  width: index == 0 ? 280 : 220,
-                  child: _PromoCard(data: promoCards[index]),
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: SizedBox(
+                height: 58,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  clipBehavior: Clip.none,
+                  itemCount: promoCards.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 12),
+                  itemBuilder: (context, index) => SizedBox(
+                    width: promoCardWidth,
+                    child: _PromoCard(data: promoCards[index]),
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 32),
-            const Text(
-              'Предложения',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
               ),
-            ),
-            const SizedBox(height: 18),
-            SizedBox(
-              height: 200,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                clipBehavior: Clip.none,
-                itemCount: offerCards.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 12),
-                itemBuilder: (context, index) =>
-                    _OfferCard(data: offerCards[index]),
+              padding: const EdgeInsets.fromLTRB(0, 20, 0, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      'Предложения',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    height: offerCardHeight,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      clipBehavior: Clip.none,
+                      itemCount: offerCards.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 12),
+                      itemBuilder: (context, index) => SizedBox(
+                        width: offerCardWidth,
+                        child: _OfferCard(data: offerCards[index]),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1141,29 +1187,41 @@ class _PromoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-      decoration: BoxDecoration(
-        color: data.background,
-        borderRadius: BorderRadius.circular(22),
-      ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
       child: Stack(
+        fit: StackFit.expand,
         children: [
-          Positioned.fill(
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: _PromoArtwork(data: data),
+          Image.asset(
+            data.image,
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.medium,
+            gaplessPlayback: true,
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Color(0x5F000000),
+                  Color(0x28000000),
+                  Color(0x00000000),
+                ],
+                stops: [0, 0.35, 0.75],
+              ),
             ),
           ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: SizedBox(
-              width: 132,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 94, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
               child: Text(
                 data.title,
+                maxLines: 2,
                 style: const TextStyle(
-                  fontSize: 15,
-                  height: 1.15,
+                  fontSize: 17,
+                  height: 1.1,
                   fontWeight: FontWeight.w700,
                   color: Colors.white,
                 ),
@@ -1176,84 +1234,6 @@ class _PromoCard extends StatelessWidget {
   }
 }
 
-class _PromoArtwork extends StatelessWidget {
-  const _PromoArtwork({required this.data});
-
-  final PromoCardData data;
-
-  @override
-  Widget build(BuildContext context) {
-    final isYellow = data.background == const Color(0xFFFDC30B);
-    return SizedBox(
-      width: isYellow ? 130 : 100,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.centerRight,
-        children: isYellow
-            ? [
-                Positioned(
-                  right: 4,
-                  bottom: -10,
-                  child: Container(
-                    width: 76,
-                    height: 90,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFC08E08),
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(30),
-                        topRight: Radius.circular(30),
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.person_pin_rounded,
-                      color: Color(0xFFFFD54F),
-                      size: 50,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  right: 46,
-                  bottom: -10,
-                  child: Container(
-                    width: 66,
-                    height: 80,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFE0A800),
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(26),
-                        topRight: Radius.circular(26),
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.face_retouching_natural_rounded,
-                      color: Color(0xFFFFE082),
-                      size: 40,
-                    ),
-                  ),
-                ),
-              ]
-            : [
-                Positioned(
-                  right: 0,
-                  child: Container(
-                    width: 86,
-                    height: 86,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  right: 20,
-                  child: Icon(data.icon, color: Colors.white, size: 40),
-                ),
-              ],
-      ),
-    );
-  }
-}
-
 class _OfferCard extends StatelessWidget {
   const _OfferCard({required this.data});
 
@@ -1261,14 +1241,48 @@ class _OfferCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 240,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: Image.asset(
-          data.image,
-          fit: BoxFit.cover,
-        ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            data.image,
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.medium,
+            gaplessPlayback: true,
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Color(0x73000000),
+                  Color(0x22000000),
+                  Color(0x00000000),
+                ],
+                stops: [0, 0.4, 0.85],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 70, 16),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Text(
+                data.title,
+                maxLines: 2,
+                style: const TextStyle(
+                  fontSize: 16,
+                  height: 1.15,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,11 +1,11 @@
 {
-    "name": "flutter_clone",
-    "short_name": "flutter_clone",
+    "name": "Avtobys",
+    "short_name": "Avtobys",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Avtobys web app.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
