@@ -21,7 +21,16 @@ export function LoginScreen({
     phoneNumber: string;
     debugCode?: string;
     deliveryStatus?: string;
+    deliveryError?: string;
     supportTelegram?: string;
+    telegramBind?: {
+      token?: string;
+      botUsername?: string;
+      deepLink?: string;
+      command?: string;
+      instructions?: string;
+      expiresAt?: string;
+    };
   }>;
   onVerifyCode: (value: string, code: string) => Promise<void>;
 }) {
@@ -43,9 +52,10 @@ export function LoginScreen({
     try {
       if (step === "phone") {
         const result = await onRequestCode(formattedPhone);
+        const canEnterCode = Boolean(result.debugCode) || result.deliveryStatus === "sent";
         setRequestPhone(result.phoneNumber);
         setStatusMessage(formatLoginStatus(result));
-        setStep("code");
+        setStep(canEnterCode ? "code" : "phone");
         setCode("");
       } else {
         await onVerifyCode(requestPhone || formattedPhone, code.trim());
@@ -674,17 +684,33 @@ function formatPhoneDigits(value: string) {
 function formatLoginStatus(result: {
   debugCode?: string;
   deliveryStatus?: string;
+  deliveryError?: string;
   supportTelegram?: string;
+  telegramBind?: {
+    botUsername?: string;
+    deepLink?: string;
+    command?: string;
+  };
 }) {
   const support = result.supportTelegram || "@aqxrx";
   if (result.debugCode) {
     return `Код отправлен в Telegram. Debug code: ${result.debugCode}`;
+  }
+  if (result.telegramBind?.command) {
+    const bot = result.telegramBind.botUsername || "Telegram bot";
+    const link = result.telegramBind.deepLink
+      ? ` Ссылка: ${result.telegramBind.deepLink}`
+      : "";
+    return `Telegram чат еще не привязан. Откройте ${bot}, отправьте ${result.telegramBind.command}, потом запросите код снова.${link}`;
   }
   if (result.deliveryStatus === "chat-not-configured") {
     return `Telegram не привязан. Напишите ${support}, затем запросите код повторно.`;
   }
   if (result.deliveryStatus === "bot-not-configured") {
     return `Бот еще не настроен. Для доступа напишите ${support}.`;
+  }
+  if (result.deliveryError) {
+    return `Не удалось отправить код: ${result.deliveryError}`;
   }
   return `Код отправлен в Telegram (${result.deliveryStatus || "pending"}).`;
 }

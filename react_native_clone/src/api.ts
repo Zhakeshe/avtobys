@@ -94,6 +94,7 @@ export type PublicConfigDto = {
   supportPhone: string;
   supportTelegram: string;
   accessRequestTelegram: string;
+  telegramBotUsername: string;
   loginDeliveryMode: string;
   defaultLanguage: string;
   availableLanguages: string[];
@@ -106,15 +107,26 @@ export type PublicConfigDto = {
   trialRideCount: number;
 };
 
+export type TelegramBindDto = {
+  token: string;
+  botUsername: string;
+  deepLink: string;
+  command: string;
+  instructions: string;
+  expiresAt: string;
+};
+
 export type AuthRequestDto = {
   ok: boolean;
   phoneNumber: string;
   expiresAt: string;
   debugCode?: string;
   supportTelegram?: string;
+  telegramBind?: TelegramBindDto;
   delivery?: {
     status: string;
     chatId?: string;
+    error?: string;
   };
 };
 

@@ -14,6 +14,21 @@ npm install
 npm start
 ```
 
+Backend env setup:
+
+```powershell
+cd C:\Users\Zhorik\Desktop\avtobys\backend
+Copy-Item .env.example .env
+```
+
+Set these values in `backend/.env` for Telegram login delivery:
+
+- `TELEGRAM_BOT_TOKEN=...`
+- `TELEGRAM_BOT_USERNAME=...` (without `@`)
+- `TELEGRAM_POLLING=true` for local/http mode
+- `TELEGRAM_DEFAULT_CHAT_ID=...` (optional fallback)
+- `TELEGRAM_CHAT_MAP_JSON={"+77001234567":"123456789"}` (optional)
+
 URLs:
 
 - API: `http://localhost:4000/api`

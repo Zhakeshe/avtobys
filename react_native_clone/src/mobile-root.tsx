@@ -162,7 +162,9 @@ export default function MobileRoot() {
       phoneNumber: result.phoneNumber,
       debugCode: result.debugCode,
       deliveryStatus: result.delivery?.status ?? "",
+      deliveryError: result.delivery?.error,
       supportTelegram: result.supportTelegram,
+      telegramBind: result.telegramBind,
     };
   };
 

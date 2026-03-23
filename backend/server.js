@@ -1,7 +1,10 @@
 const cors = require("cors");
 const crypto = require("crypto");
+const dotenv = require("dotenv");
 const express = require("express");
 const path = require("path");
+
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const {
   getClient,
@@ -20,15 +23,15 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const AUTH_CODE_TTL_MS = 5 * 60 * 1000;
 const TELEGRAM_BIND_TTL_MS = 15 * 60 * 1000;
 const RIDE_TICKET_TTL_MS = 45 * 60 * 1000;
-const DEFAULT_ADMIN_TOKEN = process.env.ADMIN_TOKEN || "avtobys-admin-dev";
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const TELEGRAM_DEFAULT_CHAT_ID = process.env.TELEGRAM_DEFAULT_CHAT_ID || "";
-const TELEGRAM_BOT_USERNAME = `${process.env.TELEGRAM_BOT_USERNAME || ""}`
+const DEFAULT_ADMIN_TOKEN = readEnvString("ADMIN_TOKEN", "avtobys-admin-dev");
+const TELEGRAM_BOT_TOKEN = readEnvString("TELEGRAM_BOT_TOKEN");
+const TELEGRAM_DEFAULT_CHAT_ID = readEnvString("TELEGRAM_DEFAULT_CHAT_ID");
+const TELEGRAM_BOT_USERNAME = readEnvString("TELEGRAM_BOT_USERNAME")
   .replace(/^@+/, "")
   .trim();
 const TELEGRAM_CHAT_MAP = safeJsonObject(process.env.TELEGRAM_CHAT_MAP_JSON);
 const IS_PROD = process.env.NODE_ENV === "production";
-const TELEGRAM_POLLING = process.env.TELEGRAM_POLLING === "true";
+const TELEGRAM_POLLING = readEnvString("TELEGRAM_POLLING").toLowerCase() === "true";
 
 let telegramPollingOffset = 0;
 let telegramPollingStarted = false;
@@ -47,6 +50,15 @@ function futureIso(ms) {
 
 function id(prefix) {
   return `${prefix}-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+}
+
+function readEnvString(name, fallback = "") {
+  const value = process.env[name];
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const normalized = value.trim();
+  return normalized || fallback;
 }
 
 function safeJsonObject(value) {
@@ -1191,6 +1203,7 @@ app.post("/api/auth/request-code", async (req, res) => {
         delivery: {
           status: delivery.status,
           chatId: delivery.chatId || undefined,
+          error: delivery.error || undefined,
         },
         telegramBind,
         debugCode: IS_PROD ? undefined : code,
