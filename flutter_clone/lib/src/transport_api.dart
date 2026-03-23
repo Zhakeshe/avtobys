@@ -318,6 +318,7 @@ class AuthCodeRequestDto {
     required this.expiresAt,
     this.debugCode,
     this.deliveryStatus,
+    this.deliveryError,
     this.supportTelegram,
     this.telegramBind,
   });
@@ -327,6 +328,7 @@ class AuthCodeRequestDto {
   final DateTime expiresAt;
   final String? debugCode;
   final String? deliveryStatus;
+  final String? deliveryError;
   final String? supportTelegram;
   final TelegramBindDto? telegramBind;
 
@@ -340,6 +342,7 @@ class AuthCodeRequestDto {
           DateTime.now(),
       debugCode: json['debugCode'] as String?,
       deliveryStatus: delivery?['status'] as String?,
+      deliveryError: delivery?['error'] as String?,
       supportTelegram: json['supportTelegram'] as String?,
       telegramBind: telegramBind == null
           ? null

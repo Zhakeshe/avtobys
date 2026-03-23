@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'data.dart';
 import 'theme.dart';
@@ -354,6 +355,7 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
       final canEnterCode =
           (response.debugCode?.isNotEmpty ?? false) ||
           response.deliveryStatus == 'sent';
+      final deliveryError = _mapDeliveryError(response);
       if (!mounted) {
         return;
       }
@@ -362,6 +364,7 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
         _requesting = false;
         _debugCode = response.debugCode;
         _telegramBind = response.telegramBind;
+        _error = deliveryError;
         _codeController.clear();
       });
       if (response.telegramBind != null) {
@@ -423,6 +426,51 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
         _error = error.toString();
       });
     }
+  }
+
+  Future<void> _openTelegramValue(String value) async {
+    final raw = value.trim();
+    if (raw.isEmpty) {
+      return;
+    }
+    final uri = Uri.tryParse(raw);
+    if (uri == null) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = 'Invalid Telegram link.';
+      });
+      return;
+    }
+
+    final opened = await launchUrl(uri, mode: LaunchMode.platformDefault);
+    if (!opened && mounted) {
+      setState(() {
+        _error = 'Could not open Telegram. Please copy the link manually.';
+      });
+    }
+  }
+
+  String _mapDeliveryError(AuthCodeRequestDto response) {
+    if ((response.debugCode?.isNotEmpty ?? false) || response.deliveryStatus == 'sent') {
+      return '';
+    }
+    if (response.telegramBind != null) {
+      return '';
+    }
+    final deliveryError = response.deliveryError?.trim() ?? '';
+    if (deliveryError.isNotEmpty) {
+      return deliveryError;
+    }
+    if (response.deliveryStatus == 'chat-not-configured') {
+      return 'Bind Telegram chat for this phone number first.';
+    }
+    if (response.deliveryStatus == 'bot-not-configured') {
+      return 'Telegram bot is not configured yet.';
+    }
+    final status = response.deliveryStatus?.trim() ?? '';
+    return status.isNotEmpty ? 'Code was not delivered ($status).' : '';
   }
 
   Future<void> _copyTelegramValue(String value) async {
@@ -553,6 +601,7 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
                             _TelegramBindInfoCard(
                               bind: _telegramBind!,
                               onCopy: _copyTelegramValue,
+                              onOpen: _openTelegramValue,
                             ),
                           ],
                           if (_error.isNotEmpty) ...[
@@ -892,6 +941,30 @@ class _SettingsOverlayState extends State<SettingsOverlay> {
     }
   }
 
+  Future<void> _openTelegramValue(String value) async {
+    final raw = value.trim();
+    if (raw.isEmpty) {
+      return;
+    }
+    final uri = Uri.tryParse(raw);
+    if (uri == null) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _message = 'Invalid Telegram link.';
+      });
+      return;
+    }
+
+    final opened = await launchUrl(uri, mode: LaunchMode.platformDefault);
+    if (!opened && mounted) {
+      setState(() {
+        _message = 'Could not open Telegram. Please copy the link manually.';
+      });
+    }
+  }
+
   Future<void> _copyTelegramValue(String value) async {
     await Clipboard.setData(ClipboardData(text: value));
     if (!mounted) {
@@ -1022,6 +1095,7 @@ class _SettingsOverlayState extends State<SettingsOverlay> {
                 _TelegramBindInfoCard(
                   bind: _telegramBind!,
                   onCopy: _copyTelegramValue,
+                  onOpen: _openTelegramValue,
                 ),
               ],
               const SizedBox(height: 10),
@@ -1574,10 +1648,12 @@ class _TelegramBindInfoCard extends StatelessWidget {
   const _TelegramBindInfoCard({
     required this.bind,
     required this.onCopy,
+    required this.onOpen,
   });
 
   final TelegramBindDto bind;
   final Future<void> Function(String value) onCopy;
+  final Future<void> Function(String value) onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -1625,6 +1701,13 @@ class _TelegramBindInfoCard extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
+              if (bind.deepLink.isNotEmpty)
+                OutlinedButton(
+                  onPressed: () {
+                    onOpen(bind.deepLink);
+                  },
+                  child: const Text('Open Telegram'),
+                ),
               OutlinedButton(
                 onPressed: () {
                   onCopy(bind.command);

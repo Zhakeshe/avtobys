@@ -25,7 +25,6 @@ const TELEGRAM_BIND_TTL_MS = 15 * 60 * 1000;
 const RIDE_TICKET_TTL_MS = 45 * 60 * 1000;
 const DEFAULT_ADMIN_TOKEN = readEnvString("ADMIN_TOKEN", "avtobys-admin-dev");
 const TELEGRAM_BOT_TOKEN = readEnvString("TELEGRAM_BOT_TOKEN");
-const TELEGRAM_DEFAULT_CHAT_ID = readEnvString("TELEGRAM_DEFAULT_CHAT_ID");
 const TELEGRAM_BOT_USERNAME = readEnvString("TELEGRAM_BOT_USERNAME")
   .replace(/^@+/, "")
   .trim();
@@ -459,7 +458,7 @@ async function ensureUser(client, phoneNumber, payload = {}) {
         normalizedPhone,
         payload.fullName || "Новый пользователь",
         payload.cityName || "",
-        payload.telegramChatId || "",
+        "",
         settings.trialRideCount,
         settings.defaultLanguage,
       ],
@@ -488,21 +487,15 @@ async function ensureUser(client, phoneNumber, payload = {}) {
       Object.prototype.hasOwnProperty.call(payload, "cityName")
         ? `${payload.cityName || ""}`.trim()
         : user.city_name;
-    const nextTelegramChatId =
-      Object.prototype.hasOwnProperty.call(payload, "telegramChatId")
-        ? `${payload.telegramChatId || ""}`.trim()
-        : user.telegram_chat_id;
-
     await client.query(
       `
       UPDATE users
       SET full_name = $2,
           city_name = $3,
-          telegram_chat_id = $4,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
       `,
-      [user.id, nextFullName, nextCityName, nextTelegramChatId],
+      [user.id, nextFullName, nextCityName],
     );
     user = await maybeOne("SELECT * FROM users WHERE id = $1", [user.id], client);
   }
@@ -633,19 +626,22 @@ async function requireAdminContext(req, res, client) {
   return { admin };
 }
 
-async function resolveTelegramChatId(client, phoneNumber, explicitChatId) {
+async function resolveTelegramChatId(client, phoneNumber) {
   const normalizedPhone = normalizePhoneNumber(phoneNumber);
   const user = await maybeOne(
     "SELECT telegram_chat_id FROM users WHERE phone_number = $1",
     [normalizedPhone],
     client,
   );
-  return (
-    explicitChatId ||
-    user?.telegram_chat_id ||
-    TELEGRAM_CHAT_MAP[normalizedPhone] ||
-    ""
-  );
+  const boundChatId = `${user?.telegram_chat_id || ""}`.trim();
+  if (boundChatId) {
+    return boundChatId;
+  }
+  const mappedChatId = `${TELEGRAM_CHAT_MAP[normalizedPhone] || ""}`.trim();
+  if (mappedChatId) {
+    return mappedChatId;
+  }
+  return "";
 }
 
 function buildTelegramStartCommand(token) {
@@ -799,8 +795,8 @@ async function sendTelegramMessage(chatId, text) {
   }
 }
 
-async function sendTelegramCode(client, settings, phoneNumber, code, explicitChatId) {
-  const chatId = await resolveTelegramChatId(client, phoneNumber, explicitChatId);
+async function sendTelegramCode(client, settings, phoneNumber, code) {
+  const chatId = await resolveTelegramChatId(client, phoneNumber);
   const delivery = {
     id: id("delivery"),
     phoneNumber,
@@ -897,6 +893,34 @@ async function handleTelegramUpdate(update) {
       return {
         phoneNumber: bindToken.phone_number || "",
         replyText: "Account was not found. Request a new Telegram link in Avtobys.",
+      };
+    }
+
+    const existingOwner = await maybeOne(
+      `
+      SELECT id, phone_number
+      FROM users
+      WHERE telegram_chat_id = $1
+        AND id <> $2
+      LIMIT 1
+      `,
+      [chatId, user.id],
+      client,
+    );
+    if (existingOwner) {
+      await client.query(
+        `
+        UPDATE telegram_bind_tokens
+        SET status = 'expired',
+            chat_id = $2,
+            used_at = $3
+        WHERE id = $1
+        `,
+        [bindToken.id, chatId, nowIso()],
+      );
+      return {
+        phoneNumber: bindToken.phone_number || "",
+        replyText: `This Telegram chat is already connected to ${existingOwner.phone_number}. Use that phone number to sign in.`,
       };
     }
 
@@ -1151,7 +1175,6 @@ app.post("/api/auth/request-code", async (req, res) => {
       const user = await ensureUser(client, phoneNumber, {
         fullName: req.body.fullName,
         cityName: req.body.cityName,
-        telegramChatId: req.body.telegramChatId,
       });
       const telegramBind = !user.telegram_chat_id
         ? await createTelegramBindToken(client, user)
@@ -1163,7 +1186,6 @@ app.post("/api/auth/request-code", async (req, res) => {
         settings,
         phoneNumber,
         code,
-        req.body.telegramChatId,
       );
 
       await client.query(
@@ -1425,7 +1447,6 @@ app.patch("/api/me", async (req, res) => {
       const user = await ensureUser(client, context.user.phone_number, {
         fullName: req.body.fullName,
         cityName: req.body.cityName,
-        telegramChatId: req.body.telegramChatId,
       });
 
       return serializeUser(user);
@@ -2729,6 +2750,24 @@ app.patch("/api/admin/users/:userId", async (req, res) => {
         typeof req.body.telegramChatId === "string"
           ? req.body.telegramChatId.trim()
           : user.telegram_chat_id;
+      if (nextTelegramChatId) {
+        const existingOwner = await maybeOne(
+          `
+          SELECT phone_number
+          FROM users
+          WHERE telegram_chat_id = $1
+            AND id <> $2
+          LIMIT 1
+          `,
+          [nextTelegramChatId, user.id],
+          client,
+        );
+        if (existingOwner) {
+          throw new Error(
+            `Telegram chat is already connected to ${existingOwner.phone_number}`,
+          );
+        }
+      }
       const nextRideAccessEnabled =
         typeof req.body.rideAccessEnabled === "boolean"
           ? req.body.rideAccessEnabled
