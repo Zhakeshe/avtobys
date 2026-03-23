@@ -64,16 +64,10 @@ class PromoCardData {
 
 class OfferCardData {
   const OfferCardData({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.colors,
+    required this.image,
   });
 
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final List<Color> colors;
+  final String image;
 }
 
 class PaymentCategoryData {
@@ -256,24 +250,11 @@ const promoCards = [
 ];
 
 const offerCards = [
-  OfferCardData(
-    title: 'Оплачивайте\nмобильную связь',
-    subtitle: 'Быстрые платежи без комиссии',
-    icon: Icons.phone_android_rounded,
-    colors: [Color(0xFFD91B73), Color(0xFF9E1668)],
-  ),
-  OfferCardData(
-    title: 'Пополняйте игровые\nаккаунты',
-    subtitle: 'Популярные сервисы в пару касаний',
-    icon: Icons.sports_esports_outlined,
-    colors: [Color(0xFF8A66FB), Color(0xFF4B38D4)],
-  ),
-  OfferCardData(
-    title: 'Оформляйте новые\nкарты и тарифы',
-    subtitle: 'Отдельный раздел для акций и льгот',
-    icon: Icons.discount_outlined,
-    colors: [Color(0xFF1B86FF), Color(0xFF1956F3)],
-  ),
+  OfferCardData(image: 'assets/banners/banner_pink.png'),
+  OfferCardData(image: 'assets/banners/banner_violet.png'),
+  OfferCardData(image: 'assets/banners/banner_red.png'),
+  OfferCardData(image: 'assets/banners/banner_green.png'),
+  OfferCardData(image: 'assets/banners/banner_yellow.png'),
 ];
 
 const paymentCategories = [

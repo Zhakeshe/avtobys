@@ -560,15 +560,15 @@ class HomeScreen extends StatelessWidget {
     return ColoredBox(
       color: AppColors.background,
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 12, 24, 140),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 140),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _TopOfferCard(
+            const _TopOfferCard(
               title: 'Оформить\nльготный тариф',
               icon: Icons.discount_outlined,
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 18),
             _WalletSection(
               phoneNumber: phoneNumber,
               walletState: walletState,
@@ -578,39 +578,41 @@ class HomeScreen extends StatelessWidget {
               onOpenCards: onOpenCards,
               onOpenTopUp: onOpenTopUp,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
             _ServiceGrid(
               onOpenPayments: onOpenPayments,
               onOpenTransfers: onOpenTransfers,
               onOpenTickets: onOpenTickets,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 28),
             SizedBox(
-              height: 92,
+              height: 100,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
+                clipBehavior: Clip.none,
                 itemCount: promoCards.length,
                 separatorBuilder: (_, _) => const SizedBox(width: 12),
                 itemBuilder: (context, index) => SizedBox(
-                  width: index == 0 ? 262 : 206,
+                  width: index == 0 ? 280 : 220,
                   child: _PromoCard(data: promoCards[index]),
                 ),
               ),
             ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 32),
             const Text(
               'Предложения',
               style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
                 color: AppColors.textPrimary,
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 18),
             SizedBox(
-              height: 196,
+              height: 200,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
+                clipBehavior: Clip.none,
                 itemCount: offerCards.length,
                 separatorBuilder: (_, _) => const SizedBox(width: 12),
                 itemBuilder: (context, index) =>
@@ -649,63 +651,55 @@ class _WalletSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 10, 10, 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: appCardShadow,
-      ),
-      child: Column(
-        children: [
-          SizedBox(
-            height: 168,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  flex: 7,
-                  child: WalletOverviewCard(
-                    walletState: walletState,
-                    onTap: onOpenTopUp,
-                  ),
+    return Column(
+      children: [
+        SizedBox(
+          height: 172,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 7,
+                child: WalletOverviewCard(
+                  walletState: walletState,
+                  onTap: onOpenTopUp,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 3,
-                  child: WalletCardsTile(
-                    walletState: walletState,
-                    onTap: onOpenCards,
-                  ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 3,
+                child: WalletCardsTile(
+                  walletState: walletState,
+                  onTap: onOpenCards,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: quickActions
-                .map(
-                  (action) => Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                        right: action == quickActions.last ? 0 : 12,
-                      ),
-                      child: _ActionTile(
-                        data: action,
-                        onTap: switch (action.id) {
-                          'qr' => onOpenQr,
-                          'bluetooth' => onOpenBluetooth,
-                          'plate' => onOpenPlate,
-                          _ => null,
-                        },
-                      ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: quickActions
+              .map(
+                (action) => Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      right: action == quickActions.last ? 0 : 12,
+                    ),
+                    child: _ActionTile(
+                      data: action,
+                      onTap: switch (action.id) {
+                        'qr' => onOpenQr,
+                        'bluetooth' => onOpenBluetooth,
+                        'plate' => onOpenPlate,
+                        _ => null,
+                      },
                     ),
                   ),
-                )
-                .toList(),
-          ),
-        ],
-      ),
+                ),
+              )
+              .toList(),
+        ),
+      ],
     );
   }
 }
@@ -782,80 +776,85 @@ class BottomTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: SizedBox(
-        height: 112,
-        width: double.infinity,
+    return Container(
+      height: 100,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade100)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
         child: Stack(
+          alignment: Alignment.center,
           clipBehavior: Clip.none,
-          alignment: Alignment.topCenter,
           children: [
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: Container(
-                height: 84,
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  border: Border(top: BorderSide(color: AppColors.border)),
-                  boxShadow: appCardShadow,
+            Row(
+              children: [
+                Expanded(
+                  child: _BottomTabItem(
+                    icon: Icons.home_filled,
+                    label: 'Avtobys',
+                    isSelected: selectedTab == RootTab.home,
+                    onTap: () => onTabSelected(RootTab.home),
+                  ),
                 ),
-                padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _BottomTabItem(
-                        icon: Icons.account_balance_wallet_outlined,
-                        label: 'Avtobys',
-                        isSelected: selectedTab == RootTab.home,
-                        onTap: () => onTabSelected(RootTab.home),
-                      ),
-                    ),
-                    Expanded(
-                      child: _BottomTabItem(
-                        icon: Icons.route_outlined,
-                        label: 'Маршруты',
-                        isSelected: selectedTab == RootTab.routes,
-                        onTap: () => onTabSelected(RootTab.routes),
-                      ),
-                    ),
-                    const SizedBox(width: 84),
-                    Expanded(
-                      child: _BottomTabItem(
-                        icon: Icons.notifications_none_rounded,
-                        label: 'Уведомления',
-                        isSelected: selectedTab == RootTab.notifications,
-                        onTap: () => onTabSelected(RootTab.notifications),
-                      ),
-                    ),
-                    Expanded(
-                      child: _BottomTabItem(
-                        icon: Icons.menu_rounded,
-                        label: 'Меню',
-                        isSelected: selectedTab == RootTab.menu,
-                        onTap: () => onTabSelected(RootTab.menu),
-                      ),
-                    ),
-                  ],
+                Expanded(
+                  child: _BottomTabItem(
+                    icon: Icons.alt_route_rounded,
+                    label: 'Маршруты',
+                    isSelected: selectedTab == RootTab.routes,
+                    onTap: () => onTabSelected(RootTab.routes),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 80),
+                Expanded(
+                  child: _BottomTabItem(
+                    icon: Icons.notifications_none_rounded,
+                    label: 'Уведомления',
+                    isSelected: selectedTab == RootTab.notifications,
+                    onTap: () => onTabSelected(RootTab.notifications),
+                  ),
+                ),
+                Expanded(
+                  child: _BottomTabItem(
+                    icon: Icons.menu_rounded,
+                    label: 'Меню',
+                    isSelected: selectedTab == RootTab.menu,
+                    onTap: () => onTabSelected(RootTab.menu),
+                  ),
+                ),
+              ],
             ),
-            GestureDetector(
-              onTap: onCenterTap,
-              child: Container(
-                height: 76,
-                width: 76,
-                decoration: const BoxDecoration(
-                  color: AppColors.primaryBlue,
-                  shape: BoxShape.circle,
-                  boxShadow: appCardShadow,
-                ),
-                child: const Icon(
-                  Icons.qr_code_scanner_rounded,
-                  size: 34,
-                  color: Colors.white,
+            Positioned(
+              top: -24,
+              child: GestureDetector(
+                onTap: onCenterTap,
+                child: Container(
+                  height: 72,
+                  width: 72,
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryBlue,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primaryBlue.withValues(alpha: 0.3),
+                        blurRadius: 15,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.qr_code_scanner_rounded,
+                    size: 32,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -879,33 +878,28 @@ class _ServiceGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: appCardShadow,
-      ),
-      child: Column(
-        children: serviceItems
-            .map(
-              (item) => Padding(
-                padding: EdgeInsets.only(
-                  bottom: item == serviceItems.last ? 0 : 12,
-                ),
-                child: _ServiceTile(
-                  data: item,
-                  onTap: switch (item.id) {
-                    'payments' => onOpenPayments,
-                    'tickets' => onOpenTickets,
-                    'transfers' => onOpenTransfers,
-                    _ => null,
-                  },
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final itemWidth = (constraints.maxWidth - 12) / 2;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: serviceItems.map((item) {
+            return SizedBox(
+              width: itemWidth,
+              child: _ServiceTile(
+                data: item,
+                onTap: switch (item.id) {
+                  'payments' => onOpenPayments,
+                  'tickets' => onOpenTickets,
+                  'transfers' => onOpenTransfers,
+                  _ => null,
+                },
               ),
-            )
-            .toList(),
-      ),
+            );
+          }).toList(),
+        );
+      },
     );
   }
 }
@@ -920,30 +914,37 @@ class _ActionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 16),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: const Color(0xFFE4E8F0)),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x060D1B2A),
+              blurRadius: 10,
+              offset: Offset(0, 4),
+            ),
+          ],
         ),
         child: Column(
           children: [
             Container(
-              height: 44,
-              width: 44,
+              height: 48,
+              width: 48,
               decoration: BoxDecoration(
-                color: const Color(0xFFEAF0FF),
-                borderRadius: BorderRadius.circular(16),
+                color: const Color(0xFFF1F6FF),
+                borderRadius: BorderRadius.circular(14),
               ),
-              child: Icon(data.icon, color: AppColors.primaryBlue, size: 24),
+              child: Icon(data.icon, color: AppColors.primaryBlue, size: 26),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             Text(
               data.title,
               style: const TextStyle(
-                fontSize: 15,
+                fontSize: 16,
+                fontWeight: FontWeight.w400,
                 color: AppColors.textPrimary,
               ),
             ),
@@ -964,26 +965,33 @@ class _ServiceTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(16),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFFFCFDFF),
-          borderRadius: BorderRadius.circular(20),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x080D1B2A),
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         child: Row(
           children: [
             Container(
-              height: 54,
-              width: 54,
+              height: 48,
+              width: 48,
               decoration: BoxDecoration(
-                color: data.color,
-                borderRadius: BorderRadius.circular(16),
+                color: data.color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
                 data.icon,
-                color: AppColors.primaryBlueDark,
-                size: 28,
+                color: data.color.withValues(alpha: 0.8),
+                size: 24,
               ),
             ),
             const SizedBox(width: 10),
@@ -991,7 +999,7 @@ class _ServiceTile extends StatelessWidget {
               child: Text(
                 data.title,
                 style: const TextStyle(
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: FontWeight.w500,
                   color: AppColors.textPrimary,
                 ),
@@ -1016,55 +1024,104 @@ class _TopOfferCard extends StatelessWidget {
       width: double.infinity,
       decoration: BoxDecoration(
         color: const Color(0xFFF3F5FA),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: const Color(0xFFF0F2F8)),
+        borderRadius: BorderRadius.circular(24),
       ),
-      padding: const EdgeInsets.fromLTRB(18, 16, 16, 16),
+      padding: const EdgeInsets.fromLTRB(20, 20, 16, 20),
       child: Row(
         children: [
           Expanded(
             child: Text(
               title,
               style: const TextStyle(
-                fontSize: 19,
-                height: 1.15,
-                fontWeight: FontWeight.w700,
+                fontSize: 20,
+                height: 1.2,
+                fontWeight: FontWeight.w500,
                 color: AppColors.textPrimary,
               ),
             ),
           ),
-          Container(
-            height: 86,
-            width: 86,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFFFD36C), Color(0xFFFABE0C)],
-              ),
-              borderRadius: BorderRadius.circular(24),
-            ),
+          const SizedBox(width: 16),
+          SizedBox(
+            height: 80,
+            width: 80,
             child: Stack(
               alignment: Alignment.center,
               children: [
-                Positioned(
-                  bottom: 12,
-                  right: 14,
-                  child: Icon(
-                    icon,
-                    color: Colors.white.withValues(alpha: 0.92),
-                    size: 38,
+                Container(
+                  height: 64,
+                  width: 64,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFD54F).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                 ),
                 Positioned(
-                  top: 14,
-                  left: 14,
+                  right: 4,
+                  bottom: 4,
                   child: Container(
-                    height: 16,
-                    width: 16,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
+                    height: 68,
+                    width: 60,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0xFFFFE082), Color(0xFFFFD54F)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x1A000000),
+                          blurRadius: 10,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          height: 4,
+                          width: 24,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Container(
+                          height: 4,
+                          width: 32,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        const Spacer(),
+                        const Align(
+                          alignment: Alignment.bottomRight,
+                          child: Icon(
+                            Icons.percent_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Transform.rotate(
+                    angle: 0.2,
+                    child: Container(
+                      height: 40,
+                      width: 10,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFB300),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
                     ),
                   ),
                 ),
@@ -1126,71 +1183,70 @@ class _PromoArtwork extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isYellow = data.background == const Color(0xFFFABE0C);
+    final isYellow = data.background == const Color(0xFFFDC30B);
     return SizedBox(
-      width: isYellow ? 118 : 90,
+      width: isYellow ? 130 : 100,
       child: Stack(
         clipBehavior: Clip.none,
         alignment: Alignment.centerRight,
         children: isYellow
             ? [
                 Positioned(
-                  right: 36,
-                  bottom: 4,
+                  right: 4,
+                  bottom: -10,
                   child: Container(
-                    width: 42,
-                    height: 42,
+                    width: 76,
+                    height: 90,
                     decoration: const BoxDecoration(
-                      color: Color(0xFFFF9A0B),
-                      shape: BoxShape.circle,
+                      color: Color(0xFFC08E08),
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(30),
+                        topRight: Radius.circular(30),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.person_pin_rounded,
+                      color: Color(0xFFFFD54F),
+                      size: 50,
                     ),
                   ),
                 ),
                 Positioned(
-                  right: 8,
-                  bottom: 0,
+                  right: 46,
+                  bottom: -10,
                   child: Container(
-                    width: 48,
-                    height: 48,
+                    width: 66,
+                    height: 80,
                     decoration: const BoxDecoration(
-                      color: Color(0xFFFFD8A3),
-                      shape: BoxShape.circle,
+                      color: Color(0xFFE0A800),
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(26),
+                        topRight: Radius.circular(26),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.face_retouching_natural_rounded,
+                      color: Color(0xFFFFE082),
+                      size: 40,
                     ),
                   ),
-                ),
-                Positioned(
-                  right: 30,
-                  bottom: 34,
-                  child: Container(
-                    width: 48,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.22),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  right: 32,
-                  bottom: 12,
-                  child: Icon(data.icon, color: Colors.white, size: 26),
                 ),
               ]
             : [
                 Positioned(
                   right: 0,
                   child: Container(
-                    width: 82,
-                    height: 82,
+                    width: 86,
+                    height: 86,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
+                      color: Colors.white.withValues(alpha: 0.2),
                       shape: BoxShape.circle,
                     ),
                   ),
                 ),
                 Positioned(
-                  right: 16,
-                  child: Icon(data.icon, color: Colors.white, size: 34),
+                  right: 20,
+                  child: Icon(data.icon, color: Colors.white, size: 40),
                 ),
               ],
       ),
@@ -1205,73 +1261,14 @@ class _OfferCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 246,
-      decoration: BoxDecoration(
+    return SizedBox(
+      width: 240,
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(24),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: data.colors,
+        child: Image.asset(
+          data.image,
+          fit: BoxFit.cover,
         ),
-        boxShadow: appCardShadow,
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            right: -26,
-            top: -10,
-            child: Container(
-              width: 148,
-              height: 120,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(58),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 18,
-            top: 18,
-            child: Container(
-              height: 52,
-              width: 52,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Icon(data.icon, color: Colors.white, size: 27),
-            ),
-          ),
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Spacer(),
-                  Text(
-                    data.title,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      height: 1.08,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    data.subtitle,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFFF3EFFF),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1358,15 +1355,13 @@ class _BottomTabItem extends StatelessWidget {
     final color = isSelected ? AppColors.primaryBlue : AppColors.textSecondary;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(icon, color: color, size: 28),
           const SizedBox(height: 4),
           Text(
             label,
-            textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12,
               fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,

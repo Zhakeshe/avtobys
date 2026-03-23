@@ -35,8 +35,8 @@ class WalletOverviewCard extends StatelessWidget {
               right: 4,
               top: 4,
               child: Container(
-                height: 54,
-                width: 54,
+                height: 52,
+                width: 52,
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.16),
                   shape: BoxShape.circle,
@@ -44,7 +44,7 @@ class WalletOverviewCard extends StatelessWidget {
                 child: const Icon(
                   Icons.add_rounded,
                   color: Colors.white,
-                  size: 30,
+                  size: 28,
                 ),
               ),
             ),
@@ -59,22 +59,24 @@ class WalletOverviewCard extends StatelessWidget {
               children: [
                 const Text(
                   'Баланс',
-                  style: TextStyle(fontSize: 15, color: Color(0xFFE6EBFF)),
+                  style: TextStyle(fontSize: 14, color: Color(0xFFE6EBFF)),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Text(
                   '${formatBalance(walletState.balance)} ₸',
                   style: const TextStyle(
-                    fontSize: 24,
+                    fontSize: 26,
                     fontWeight: FontWeight.w700,
                     color: Colors.white,
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 Text(
-                  walletState.activeCard?.maskedNumber ?? 'Стандарт',
+                  walletState.activeCard?.isTransport == true
+                      ? 'Транспортная'
+                      : 'Стандарт',
                   style: const TextStyle(
-                    fontSize: 16,
+                    fontSize: 15,
                     color: Color(0xFFD7DEFF),
                   ),
                 ),
@@ -101,44 +103,33 @@ class WalletCardsTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(24),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: const Color(0xFFE4E8F0), width: 1.2),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: const Color(0xFFF1F4F9), width: 1.5),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 20),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const SizedBox(
-              width: 44,
-              height: 44,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.all(Radius.circular(14)),
-                  border: Border.fromBorderSide(
-                    BorderSide(color: Color(0xFFE2E6EF)),
-                  ),
-                ),
-                child: Icon(
-                  Icons.add_rounded,
-                  color: AppColors.textSecondary,
-                  size: 28,
-                ),
-              ),
+            const Icon(
+              Icons.add_rounded,
+              color: Color(0xFFC0C7D8),
+              size: 38,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Text(
               walletState.cards.isEmpty
                   ? 'Добавить\nкарту'
                   : '${walletState.cards.length}\nкарты',
               textAlign: TextAlign.center,
               style: const TextStyle(
-                fontSize: 16,
+                fontSize: 14,
                 height: 1.2,
-                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w400,
+                color: Color(0xFF9EA7BE),
               ),
             ),
           ],
