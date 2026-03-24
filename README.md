@@ -125,6 +125,59 @@ Proxy `/api` to:
 
 - `http://127.0.0.1:4000/api`
 
+## Subdomain + HTTPS for web app
+
+QR/camera and Bluetooth flows in browser should be opened from HTTPS.
+
+1. Create DNS `A` record for subdomain, for example:
+   - `pay.avtobys.kz -> YOUR_SERVER_IP`
+2. Nginx config (`/etc/nginx/sites-available/avtobys`):
+
+```nginx
+server {
+    listen 80;
+    server_name pay.avtobys.kz;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name pay.avtobys.kz;
+
+    root /var/www/avtobys/flutter_clone/build/web;
+    index index.html;
+
+    ssl_certificate /etc/letsencrypt/live/pay.avtobys.kz/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pay.avtobys.kz/privkey.pem;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:4000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+3. Issue certificate:
+
+```bash
+sudo certbot --nginx -d pay.avtobys.kz
+sudo systemctl reload nginx
+```
+
+4. Rebuild web for HTTPS domain:
+
+```bash
+cd /var/www/avtobys/flutter_clone
+flutter build web --dart-define=AVTOBUS_API_URL=https://pay.avtobys.kz/api
+```
+
 ## Current Flutter flow
 
 - login by phone with Telegram code
@@ -149,3 +202,4 @@ Proxy `/api` to:
 - Real camera scanning and real Bluetooth in browser are still limited by browser/platform support.
 - For stable iPhone web version use the current QR token flow.
 - For full native camera/Bluetooth later, build Flutter iOS and Flutter Android apps separately.
+- iPhone browser mode is blocked by `web/index.html`: users must use Share -> Add to Home Screen.

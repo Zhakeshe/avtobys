@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -20,6 +21,8 @@ class AvtobysCloneApp extends StatefulWidget {
 }
 
 class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
+  final GlobalKey<ScaffoldMessengerState> _messengerKey =
+      GlobalKey<ScaffoldMessengerState>();
   RootTab _selectedTab = RootTab.home;
   RootTab _lastContentTab = RootTab.home;
   bool _isLoading = true;
@@ -142,6 +145,57 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
       }
       _selectedTab = tab;
     });
+  }
+
+  bool get _isSecureWebContext {
+    if (!kIsWeb) {
+      return true;
+    }
+    final host = Uri.base.host.toLowerCase();
+    final isLocalhost = host == 'localhost' || host == '127.0.0.1';
+    return Uri.base.scheme == 'https' || isLocalhost;
+  }
+
+  bool get _isIOSWeb => kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+  void _showRuntimeMessage(String message) {
+    final messenger = _messengerKey.currentState;
+    if (messenger == null) {
+      return;
+    }
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  bool _requireSecureContextForPayment(String modeLabel) {
+    if (_isSecureWebContext) {
+      return true;
+    }
+    _showRuntimeMessage(
+      'Для $modeLabel нужен HTTPS. Откройте сайт по https://subdomain.',
+    );
+    return false;
+  }
+
+  void _openQrPayment() {
+    if (!_requireSecureContextForPayment('QR оплаты')) {
+      return;
+    }
+    _selectTab(RootTab.qr);
+  }
+
+  void _openBluetoothPayment() {
+    if (!_requireSecureContextForPayment('Bluetooth оплаты')) {
+      return;
+    }
+    if (_isIOSWeb) {
+      _showRuntimeMessage(
+        'На iPhone Bluetooth в браузере не поддерживается. Используйте QR.',
+      );
+      return;
+    }
+    _openOverlay(AppOverlay.bluetooth);
   }
 
   void _openOverlay(AppOverlay overlay) {
@@ -342,6 +396,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: _config.appName,
+      scaffoldMessengerKey: _messengerKey,
       theme: ThemeData(
         useMaterial3: true,
         scaffoldBackgroundColor: Colors.white,
@@ -390,7 +445,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
             child: BottomTabBar(
               selectedTab: _selectedTab,
               onTabSelected: _selectTab,
-              onCenterTap: () => _selectTab(RootTab.qr),
+              onCenterTap: _openQrPayment,
             ),
           ),
         ],
@@ -415,8 +470,8 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
         return HomeScreen(
           phoneNumber: phoneNumber,
           walletState: _walletState,
-          onOpenQr: () => _selectTab(RootTab.qr),
-          onOpenBluetooth: () => _openOverlay(AppOverlay.bluetooth),
+          onOpenQr: _openQrPayment,
+          onOpenBluetooth: _openBluetoothPayment,
           onOpenPlate: () => _openOverlay(AppOverlay.plate),
           onOpenPayments: () => _openOverlay(AppOverlay.payments),
           onOpenTransfers: () => _openOverlay(AppOverlay.transfers),
