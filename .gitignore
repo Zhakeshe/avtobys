@@ -6,6 +6,7 @@ pubspec.lock
 
 # Node modules
 backend/node_modules/
+avtobys-web/backend/node_modules/
 react_native_clone/node_modules/
 
 # OS
