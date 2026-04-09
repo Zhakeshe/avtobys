@@ -1,13 +1,18 @@
 {
+    "id": "avtobys-pwa",
     "name": "Avtobys",
     "short_name": "Avtobys",
+    "lang": "kk",
     "start_url": ".",
+    "scope": ".",
     "display": "standalone",
+    "display_override": ["standalone", "browser"],
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "Avtobys web app.",
+    "description": "Avtobys — төлем, QR, маршруттар.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "categories": ["travel", "finance"],
     "icons": [
         {
             "src": "icons/Icon-192.png",

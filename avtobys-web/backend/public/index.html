@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Avtobys Admin</title>
+  <style>
+    :root {
+      --bg: #f4f6fb;
+      --card: #ffffff;
+      --ink: #171920;
+      --muted: #7c8498;
+      --line: #e3e8f2;
+      --blue: #2457f5;
+      --blue-soft: #edf2ff;
+      --danger: #d13a4a;
+      --success: #188a54;
+      --success-soft: #e9fff1;
+      --warn: #946200;
+      --warn-soft: #fff5da;
+      --shadow: 0 14px 34px rgba(21, 34, 63, 0.08);
+      --radius: 20px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 Arial, sans-serif; }
+    .wrap { max-width: 1500px; margin: 0 auto; padding: 24px; }
+    .topbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+    .topbar h1 { margin: 0; font-size: 28px; }
+    .spacer { flex: 1; }
+    .layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
+    .stack { display: grid; gap: 16px; }
+    .card { background: var(--card); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); }
+    .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .card h2 { margin: 0; font-size: 18px; }
+    .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+    .chip, .pill { padding: 8px 12px; border-radius: 999px; font-weight: 700; }
+    .chip { background: var(--blue-soft); color: var(--blue); }
+    .pill { font-size: 12px; padding: 6px 10px; background: #eef1f7; }
+    .pill.ok { background: var(--success-soft); color: var(--success); }
+    .pill.warn { background: var(--warn-soft); color: var(--warn); }
+    .pill.info { background: var(--blue-soft); color: var(--blue); }
+    .subgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .subgrid > .card { box-shadow: none; border: 1px solid var(--line); }
+    .fields { display: grid; gap: 10px; }
+    .row { display: flex; gap: 10px; }
+    .row > * { flex: 1; }
+    label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+    input, select, button, textarea { width: 100%; padding: 11px 13px; border-radius: 12px; border: 1px solid var(--line); background: #fff; color: var(--ink); font: inherit; }
+    textarea { min-height: 88px; resize: vertical; }
+    button { border: 0; background: var(--blue); color: #fff; cursor: pointer; }
+    button.ghost { background: var(--blue-soft); color: var(--blue); }
+    button.secondary { background: #eef1f7; color: var(--ink); }
+    button.danger { background: var(--danger); }
+    .form-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .form-actions > * { flex: 1; min-width: 140px; }
+    .list { display: grid; gap: 10px; max-height: 360px; overflow: auto; }
+    .list-item { border: 1px solid var(--line); border-radius: 16px; padding: 14px; cursor: pointer; background: #fff; }
+    .list-item.active { border-color: var(--blue); background: var(--blue-soft); }
+    .list-title { font-weight: 700; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .helper { font-size: 12px; color: var(--muted); }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; }
+    .toolbar > * { flex: 1; min-width: 180px; }
+    .fleet-group { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+    .fleet-group:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+    .actions { display: flex; gap: 8px; }
+    .actions button { margin: 0; padding: 8px 10px; }
+    .mono { font-family: Consolas, monospace; font-size: 12px; word-break: break-all; }
+    .user-list { display: grid; gap: 12px; }
+    .user-card { border: 1px solid var(--line); border-radius: 18px; padding: 14px; background: #fff; }
+    .user-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+    .user-title { font-size: 16px; font-weight: 700; }
+    .user-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 9px 8px; border-bottom: 1px solid #eef1f6; text-align: left; vertical-align: top; }
+    @media (max-width: 1100px) {
+      .layout { grid-template-columns: 1fr; }
+      .subgrid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>Avtobys Admin</h1>
+      <div class="spacer"></div>
+      <input id="adminToken" value="avtobys-admin-dev" placeholder="Admin token" style="max-width: 260px;" />
+      <button class="ghost" style="max-width: 160px;" onclick="loadAll()">Refresh</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="layout">
+      <div class="stack" id="leftColumn"></div>
+      <div class="stack" id="rightColumn"></div>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      cities: [],
+      tariffs: [],
+      buses: [],
+      selectedCityId: null,
+      selectedTariffId: null,
+      selectedBusId: null,
+      fleetCityFilter: "all",
+      fleetQuery: ""
+    };
+
+    const adminHeaders = () => ({
+      "Content-Type": "application/json",
+      "x-admin-token": document.getElementById("adminToken").value.trim()
+    });
+
+    const api = (path, options = {}) => fetch(`/api${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      },
+      ...options
+    }).then(async (response) => {
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!response.ok) throw new Error(data?.message || `Request failed: ${response.status}`);
+      return data;
+    });
+
+    const adminApi = (path, options = {}) => api(path, {
+      ...options,
+      headers: {
+        ...adminHeaders(),
+        ...(options.headers || {})
+      }
+    });
+
+    function renderScaffold() {
+      document.getElementById("leftColumn").innerHTML = `
+        <section class="card">
+          <div class="card-head">
+            <h2>Route Management</h2>
+            <div class="muted">Cities, tariffs, buses, validator names and QR tokens</div>
+          </div>
+          <div class="stats" id="routeStats" style="margin-top: 0; margin-bottom: 14px;"></div>
+
+          <div class="subgrid">
+            <section class="card">
+              <div class="card-head">
+                <h2>Cities</h2>
+                <div class="muted" id="cityMode">Create mode</div>
+              </div>
+              <div class="fields">
+                <label>City name
+                  <input id="cityName" placeholder="City name" />
+                </label>
+                <div class="form-actions">
+                  <button onclick="submitCity()">Save city</button>
+                  <button class="secondary" onclick="resetCityForm()">Clear</button>
+                </div>
+                <div class="list" id="citiesList"></div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-head">
+                <h2>Tariffs</h2>
+                <div class="muted" id="tariffMode">Create mode</div>
+              </div>
+              <div class="fields">
+                <label>City
+                  <select id="tariffCity"></select>
+                </label>
+                <label>Tariff name
+                  <input id="tariffName" placeholder="Tariff name" />
+                </label>
+                <label>Price
+                  <input id="tariffPrice" placeholder="Price" />
+                </label>
+                <div class="form-actions">
+                  <button onclick="submitTariff()">Save tariff</button>
+                  <button class="secondary" onclick="resetTariffForm()">Clear</button>
+                </div>
+                <div class="list" id="tariffsList"></div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-head">
+                <h2>Buses</h2>
+                <div class="muted" id="busMode">Create mode</div>
+              </div>
+              <div class="fields">
+                <label>City
+                  <select id="busCity"></select>
+                </label>
+                <label>Tariff
+                  <select id="busTariff"></select>
+                </label>
+                <label>Bus number
+                  <input id="busNumber" placeholder="852CS02" />
+                </label>
+                <label>Route number
+                  <input id="busRoute" placeholder="№ 12" />
+                </label>
+                <label>Validator name
+                  <input id="busValidator" placeholder="Validator name" />
+                </label>
+                <label>QR token
+                  <input id="busQrToken" placeholder="qr-token" />
+                </label>
+                <label>Bluetooth enabled
+                  <select id="busBluetooth">
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                  </select>
+                </label>
+                <div class="toolbar">
+                  <label>Fleet city filter
+                    <select id="fleetCityFilter"></select>
+                  </label>
+                  <label>Fleet search
+                    <input id="fleetQuery" placeholder="Bus number, route or validator" />
+                  </label>
+                </div>
+                <div class="helper">Use the filter to inspect buses by city and validator/transport number.</div>
+                <div class="form-actions">
+                  <button onclick="submitBus()">Save bus</button>
+                  <button class="secondary" onclick="resetBusForm()">Clear</button>
+                </div>
+                <div class="list" id="fleetList"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>App Settings</h2>
+            <div class="muted">Login, Telegram support, trial rides and currency</div>
+          </div>
+          <div class="fields">
+            <div class="row">
+              <label>Support phone
+                <input id="supportPhone" placeholder="Support phone" />
+              </label>
+              <label>Support telegram
+                <input id="supportTelegram" placeholder="Support telegram" />
+              </label>
+            </div>
+            <div class="row">
+              <label>Access telegram
+                <input id="accessRequestTelegram" placeholder="@aqxrx" />
+              </label>
+              <label>Login delivery mode
+                <input id="loginDeliveryMode" placeholder="telegram" />
+              </label>
+            </div>
+            <div class="row">
+              <label>Default language
+                <input id="defaultLanguage" placeholder="Default language" />
+              </label>
+              <label>Currency symbol
+                <input id="currencySymbol" placeholder="₸" />
+              </label>
+            </div>
+            <div class="row">
+              <label>New user bonus
+                <input id="newUserBonusBalance" placeholder="New user bonus" />
+              </label>
+              <label>Trial rides
+                <input id="trialRideCount" placeholder="2" />
+              </label>
+            </div>
+            <div class="row">
+              <label>Minimum top-up
+                <input id="minimumTopUpAmount" placeholder="Minimum top-up" />
+              </label>
+              <label>Share URL
+                <input id="shareUrl" placeholder="Share url" />
+              </label>
+            </div>
+            <div class="row">
+              <label>Maintenance mode
+                <select id="maintenanceMode">
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
+              </label>
+              <div></div>
+            </div>
+            <button onclick="saveSettings()">Save settings</button>
+          </div>
+        </section>
+      `;
+
+      document.getElementById("rightColumn").innerHTML = `
+        <section class="card">
+          <div class="card-head">
+            <h2>Users</h2>
+            <div class="muted">Grant ride access, set trials and update balances</div>
+          </div>
+          <div id="users"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Recent Tickets</h2></div>
+          <div id="tickets"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Transactions</h2></div>
+          <div id="transactions"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Telegram Deliveries</h2></div>
+          <div id="deliveries"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Support Requests</h2></div>
+          <div id="support"></div>
+        </section>
+      `;
+    }
+
+    async function loadAll() {
+      const [summary, settings, users, cities, tariffs, buses, tickets, transactions, deliveries, support] = await Promise.all([
+        adminApi("/admin/summary"),
+        adminApi("/admin/app-settings"),
+        adminApi("/admin/users"),
+        api("/cities"),
+        api("/tariffs"),
+        api("/buses"),
+        adminApi("/admin/tickets"),
+        adminApi("/admin/transactions"),
+        adminApi("/admin/deliveries"),
+        adminApi("/admin/support")
+      ]);
+
+      state.cities = cities;
+      state.tariffs = tariffs;
+      state.buses = buses;
+
+      renderStats(summary);
+      renderRouteStats();
+      renderSettings(settings);
+      renderCityForm();
+      renderTariffForm();
+      renderBusForm();
+      renderUsers(users);
+      renderTickets(tickets);
+      renderTransactions(transactions);
+      renderDeliveries(deliveries);
+      renderSupport(support);
+    }
+
+    function renderStats(summary) {
+      document.getElementById("stats").innerHTML = [
+        `Users: ${summary.users}`,
+        `Cities: ${summary.cities}`,
+        `Tariffs: ${summary.tariffs}`,
+        `Buses: ${summary.buses}`,
+        `Tickets: ${summary.tickets}`,
+        `Wallet tx: ${summary.walletTransactions}`,
+        `Support: ${summary.supportMessages}`,
+        `Ride access: ${summary.usersWithRideAccess}`,
+        `Pending access: ${summary.pendingAccessRequests}`,
+        `Balance total: ${summary.totalWalletBalance} ₸`
+      ].map((item) => `<div class="chip">${item}</div>`).join("");
+    }
+
+    function renderRouteStats() {
+      const activeCityId = state.selectedBusId
+        ? state.buses.find((item) => item.id === state.selectedBusId)?.cityId
+        : state.selectedTariffId
+          ? state.tariffs.find((item) => item.id === state.selectedTariffId)?.cityId
+          : state.selectedCityId;
+      const activeCity = state.cities.find((item) => item.id === activeCityId) || null;
+      const busesInScope = state.buses.filter((item) => !activeCityId || item.cityId === activeCityId);
+      const tariffsInScope = state.tariffs.filter((item) => !activeCityId || item.cityId === activeCityId);
+      document.getElementById("routeStats").innerHTML = [
+        activeCity ? `Focused city: ${activeCity.name}` : "Focused city: All",
+        `Tariffs in scope: ${tariffsInScope.length}`,
+        `Buses in scope: ${busesInScope.length}`,
+        `Bluetooth enabled: ${busesInScope.filter((item) => item.bluetoothEnabled).length}`
+      ].map((item) => `<div class="chip">${item}</div>`).join("");
+    }
+
+    function renderSettings(settings) {
+      document.getElementById("supportPhone").value = settings.supportPhone || "";
+      document.getElementById("supportTelegram").value = settings.supportTelegram || "";
+      document.getElementById("accessRequestTelegram").value = settings.accessRequestTelegram || "";
+      document.getElementById("loginDeliveryMode").value = settings.loginDeliveryMode || "";
+      document.getElementById("defaultLanguage").value = settings.defaultLanguage || "";
+      document.getElementById("currencySymbol").value = settings.currencySymbol || "₸";
+      document.getElementById("newUserBonusBalance").value = settings.newUserBonusBalance || 0;
+      document.getElementById("trialRideCount").value = settings.trialRideCount || 0;
+      document.getElementById("minimumTopUpAmount").value = settings.minimumTopUpAmount || 0;
+      document.getElementById("shareUrl").value = settings.shareUrl || "";
+      document.getElementById("maintenanceMode").value = String(Boolean(settings.maintenanceMode));
+    }
+
+    function renderCityForm() {
+      const selected = state.cities.find((item) => item.id === state.selectedCityId) || null;
+      document.getElementById("cityMode").textContent = selected ? `Editing: ${selected.name}` : "Create mode";
+      document.getElementById("cityName").value = selected?.name || "";
+      document.getElementById("citiesList").innerHTML = state.cities.map((city) => `
+        <div class="list-item ${city.id === state.selectedCityId ? "active" : ""}" onclick="selectCity('${city.id}')">
+          <div class="list-title">${escapeHtml(city.name)}</div>
+          <div class="actions" style="margin-top:10px;">
+            <button class="secondary" onclick="event.stopPropagation(); selectCity('${city.id}')">Edit</button>
+            <button class="danger" onclick="event.stopPropagation(); removeCity('${city.id}', '${escapeHtml(city.name)}')">Delete</button>
+          </div>
+        </div>
+      `).join("");
+
+      const cityOptions = state.cities.map((city) => `<option value="${city.id}">${escapeHtml(city.name)}</option>`).join("");
+      document.getElementById("tariffCity").innerHTML = cityOptions;
+      document.getElementById("busCity").innerHTML = cityOptions;
+      document.getElementById("fleetCityFilter").innerHTML = `<option value="all">All cities</option>${cityOptions}`;
+      if (selected) {
+        document.getElementById("tariffCity").value = selected.id;
+      }
+      if (state.fleetCityFilter !== "all" && !state.cities.some((item) => item.id === state.fleetCityFilter)) {
+        state.fleetCityFilter = "all";
+      }
+      document.getElementById("fleetCityFilter").value = state.fleetCityFilter;
+    }
+
+    function renderTariffForm() {
+      const selected = state.tariffs.find((item) => item.id === state.selectedTariffId) || null;
+      document.getElementById("tariffMode").textContent = selected ? `Editing: ${selected.name}` : "Create mode";
+      document.getElementById("tariffCity").value = selected?.cityId || state.cities[0]?.id || "";
+      document.getElementById("tariffName").value = selected?.name || "";
+      document.getElementById("tariffPrice").value = selected?.price ?? "";
+      document.getElementById("tariffsList").innerHTML = state.tariffs.map((tariff) => `
+        <div class="list-item ${tariff.id === state.selectedTariffId ? "active" : ""}" onclick="selectTariff('${tariff.id}')">
+          <div class="list-title">${escapeHtml(tariff.name)}</div>
+          <div class="muted">${escapeHtml(cityName(tariff.cityId))} • ${tariff.price} ₸</div>
+          <div class="actions" style="margin-top:10px;">
+            <button class="secondary" onclick="event.stopPropagation(); selectTariff('${tariff.id}')">Edit</button>
+            <button class="danger" onclick="event.stopPropagation(); removeTariff('${tariff.id}', '${escapeHtml(tariff.name)}')">Delete</button>
+          </div>
+        </div>
+      `).join("");
+
+      renderBusTariffOptions(selected?.cityId || document.getElementById("busCity").value || state.cities[0]?.id || "");
+    }
+
+    function renderBusTariffOptions(cityId) {
+      const filtered = state.tariffs.filter((item) => !cityId || item.cityId === cityId);
+      document.getElementById("busTariff").innerHTML = filtered.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} • ${item.price} ₸</option>`).join("");
+    }
+
+    function renderBusForm() {
+      const selected = state.buses.find((item) => item.id === state.selectedBusId) || null;
+      const cityId = selected?.cityId || state.cities[0]?.id || "";
+      renderBusTariffOptions(cityId);
+      renderRouteStats();
+      document.getElementById("busMode").textContent = selected ? `Editing: ${selected.number}` : "Create mode";
+      document.getElementById("busCity").value = cityId;
+      document.getElementById("busTariff").value = selected?.tariffId || document.getElementById("busTariff").value || "";
+      document.getElementById("busNumber").value = selected?.number || "";
+      document.getElementById("busRoute").value = selected?.routeNumber || "";
+      document.getElementById("busValidator").value = selected?.validatorName || "";
+      document.getElementById("busQrToken").value = selected?.qrToken || "";
+      document.getElementById("busBluetooth").value = String(selected?.bluetoothEnabled ?? true);
+      document.getElementById("fleetQuery").value = state.fleetQuery;
+
+      const query = state.fleetQuery.trim().toLowerCase();
+      const visibleCities = state.fleetCityFilter === "all"
+        ? state.cities
+        : state.cities.filter((city) => city.id === state.fleetCityFilter);
+
+      document.getElementById("fleetList").innerHTML = visibleCities.map((city) => {
+        const items = state.buses.filter((bus) => {
+          if (bus.cityId !== city.id) return false;
+          if (!query) return true;
+          return [bus.number, bus.routeNumber, bus.validatorName || "", bus.tariffName || ""]
+            .some((value) => String(value).toLowerCase().includes(query));
+        });
+        return `
+          <div class="fleet-group">
+            <div class="list-title">${escapeHtml(city.name)}</div>
+            <div class="list" style="margin-top:10px;">
+              ${items.length === 0 ? `<div class="muted">No buses yet</div>` : items.map((bus) => `
+                <div class="list-item ${bus.id === state.selectedBusId ? "active" : ""}" onclick="selectBus('${bus.id}')">
+                  <div class="list-title">${escapeHtml(bus.number)}</div>
+                  <div class="muted">${escapeHtml(bus.routeNumber)} • ${escapeHtml(bus.tariffName || "")} • ${bus.price} ₸</div>
+                  <div class="muted mono">${escapeHtml(bus.validatorName || bus.number)} / ${escapeHtml(bus.qrToken || "")}</div>
+                  <div class="actions" style="margin-top:10px;">
+                    <button class="secondary" onclick="event.stopPropagation(); selectBus('${bus.id}')">Edit</button>
+                    <button class="danger" onclick="event.stopPropagation(); removeBus('${bus.id}', '${escapeHtml(bus.number)}')">Delete</button>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderUsers(users) {
+      document.getElementById("users").innerHTML = `<div class="user-list">${users.map((user) => `
+        <div class="user-card">
+          <div class="user-head">
+            <div>
+              <div class="user-title">${escapeHtml(user.phoneNumber)}</div>
+              <div class="muted">${escapeHtml(user.fullName || "Без имени")}</div>
+              <div class="muted">${escapeHtml(user.cityName || "No city")} • ${escapeHtml(user.status || "active")}</div>
+            </div>
+            <div class="user-badges">
+              <div class="pill ${user.rideAccessEnabled ? "ok" : "warn"}">${user.rideAccessEnabled ? "Ride access on" : "Ride access off"}</div>
+              <div class="pill info">Trials: ${Number(user.trialRidesRemaining || 0)}</div>
+              <div class="pill">Wallet: ${Number(user.wallet.balance || 0)} ₸</div>
+            </div>
+          </div>
+          <div class="fields">
+            <div class="row">
+              <label>Full name
+                <input id="user-full-${user.id}" value="${escapeHtml(user.fullName || "")}" />
+              </label>
+              <label>City
+                <input id="user-city-${user.id}" value="${escapeHtml(user.cityName || "")}" />
+              </label>
+            </div>
+            <div class="row">
+              <label>Status
+                <input id="user-status-${user.id}" value="${escapeHtml(user.status || "active")}" />
+              </label>
+              <label>Telegram chat id
+                <input id="user-chat-${user.id}" value="${escapeHtml(user.telegramChatId || "")}" />
+              </label>
+            </div>
+            <div class="row">
+              <label>Wallet balance
+                <input id="user-balance-${user.id}" value="${Number(user.wallet.balance || 0)}" />
+              </label>
+              <label>Trial rides remaining
+                <input id="user-trials-${user.id}" value="${Number(user.trialRidesRemaining || 0)}" />
+              </label>
+            </div>
+            <label>Access note
+              <textarea id="user-note-${user.id}">${escapeHtml(user.accessNote || "")}</textarea>
+            </label>
+            <div class="muted">Pending request: ${user.accessRequestedAt ? new Date(user.accessRequestedAt).toLocaleString() : "No"}</div>
+            <div class="muted">Cards: ${user.wallet.cards.length} total</div>
+            <div class="form-actions">
+              <button onclick="saveUser('${user.id}')">Save user</button>
+              <button class="ghost" onclick="toggleRideAccess('${user.id}', ${user.rideAccessEnabled ? "false" : "true"})">${user.rideAccessEnabled ? "Disable access" : "Grant access"}</button>
+              <button class="secondary" onclick="setUserTrials('${user.id}', 2)">Set 2 trials</button>
+              <button class="secondary" onclick="clearUserAccessRequest('${user.id}')">Clear request</button>
+            </div>
+          </div>
+        </div>
+      `).join("")}</div>`;
+    }
+
+    function renderTickets(items) {
+      document.getElementById("tickets").innerHTML = table(items.slice(0, 20).map((item) => [
+        `${escapeHtml(item.busNumber)}<div class="muted">${escapeHtml(item.cityName)} / ${escapeHtml(item.routeNumber)}</div>`,
+        `${item.amount} ₸<div class="muted">${escapeHtml(item.tariffName)}</div>`,
+        `<div class="muted">${new Date(item.paidAt).toLocaleString()}</div>`
+      ]));
+    }
+
+    function renderTransactions(items) {
+      document.getElementById("transactions").innerHTML = table(items.slice(0, 20).map((item) => [
+        `${escapeHtml(item.type)}<div class="muted">${escapeHtml(item.description || item.source)}</div>`,
+        `${item.amount} ₸<div class="muted">${item.balanceBefore} → ${item.balanceAfter}</div>`,
+        `<div class="muted">${new Date(item.createdAt).toLocaleString()}</div>`
+      ]));
+    }
+
+    function renderDeliveries(items) {
+      document.getElementById("deliveries").innerHTML = table(items.slice(0, 20).map((item) => [
+        `${escapeHtml(item.phoneNumber)}<div class="muted">${escapeHtml(item.chatId || "No chat id")}</div>`,
+        `${escapeHtml(item.status)}<div class="muted mono">${escapeHtml(item.messageText || "")}</div>`,
+        `<div class="muted mono">${escapeHtml(item.error || item.responseBody || "")}</div>`
+      ]));
+    }
+
+    function renderSupport(items) {
+      document.getElementById("support").innerHTML = table(items.slice(0, 20).map((item) => [
+        `${escapeHtml(item.phoneNumber || "Unknown")}<div class="muted">${escapeHtml(item.subject)}</div>`,
+        `<div class="muted">${escapeHtml(item.message)}</div>`,
+        `<div class="muted">${new Date(item.createdAt).toLocaleString()}</div>`
+      ]));
+    }
+
+    function table(rows) {
+      return `<table>${rows.map((row) => `<tr>${row.map((col) => `<td>${col}</td>`).join("")}</tr>`).join("")}</table>`;
+    }
+
+    function cityName(cityId) {
+      return state.cities.find((item) => item.id === cityId)?.name || "";
+    }
+
+    function selectCity(cityId) {
+      state.selectedCityId = cityId;
+      renderRouteStats();
+      renderCityForm();
+    }
+
+    function selectTariff(tariffId) {
+      state.selectedTariffId = tariffId;
+      renderRouteStats();
+      renderTariffForm();
+    }
+
+    function selectBus(busId) {
+      state.selectedBusId = busId;
+      renderRouteStats();
+      renderBusForm();
+    }
+
+    function resetCityForm() {
+      state.selectedCityId = null;
+      renderCityForm();
+    }
+
+    function resetTariffForm() {
+      state.selectedTariffId = null;
+      renderTariffForm();
+    }
+
+    function resetBusForm() {
+      state.selectedBusId = null;
+      renderBusForm();
+    }
+
+    async function submitCity() {
+      const name = document.getElementById("cityName").value.trim();
+      if (!name) return;
+      if (state.selectedCityId) {
+        await api(`/cities/${state.selectedCityId}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      } else {
+        await api("/cities", { method: "POST", body: JSON.stringify({ name }) });
+      }
+      resetCityForm();
+      loadAll();
+    }
+
+    async function submitTariff() {
+      const payload = {
+        cityId: document.getElementById("tariffCity").value,
+        name: document.getElementById("tariffName").value.trim(),
+        price: Number(document.getElementById("tariffPrice").value || 0)
+      };
+      if (!payload.cityId || !payload.name || !payload.price) return;
+      if (state.selectedTariffId) {
+        await api(`/tariffs/${state.selectedTariffId}`, { method: "PATCH", body: JSON.stringify(payload) });
+      } else {
+        await api("/tariffs", { method: "POST", body: JSON.stringify(payload) });
+      }
+      resetTariffForm();
+      loadAll();
+    }
+
+    async function submitBus() {
+      const payload = {
+        cityId: document.getElementById("busCity").value,
+        tariffId: document.getElementById("busTariff").value,
+        number: document.getElementById("busNumber").value.trim().toUpperCase(),
+        routeNumber: document.getElementById("busRoute").value.trim(),
+        validatorName: document.getElementById("busValidator").value.trim().toUpperCase(),
+        qrToken: document.getElementById("busQrToken").value.trim(),
+        bluetoothEnabled: document.getElementById("busBluetooth").value === "true"
+      };
+      if (!payload.cityId || !payload.tariffId || !payload.number || !payload.routeNumber) return;
+      if (state.selectedBusId) {
+        await api(`/buses/${state.selectedBusId}`, { method: "PATCH", body: JSON.stringify(payload) });
+      } else {
+        await api("/buses", { method: "POST", body: JSON.stringify(payload) });
+      }
+      resetBusForm();
+      loadAll();
+    }
+
+    async function removeCity(cityId, name) {
+      if (!confirm(`Delete city ${name}?`)) return;
+      await api(`/cities/${cityId}`, { method: "DELETE" });
+      if (state.selectedCityId === cityId) state.selectedCityId = null;
+      loadAll();
+    }
+
+    async function removeTariff(tariffId, name) {
+      if (!confirm(`Delete tariff ${name}?`)) return;
+      await api(`/tariffs/${tariffId}`, { method: "DELETE" });
+      if (state.selectedTariffId === tariffId) state.selectedTariffId = null;
+      loadAll();
+    }
+
+    async function removeBus(busId, number) {
+      if (!confirm(`Delete bus ${number}?`)) return;
+      await api(`/buses/${busId}`, { method: "DELETE" });
+      if (state.selectedBusId === busId) state.selectedBusId = null;
+      loadAll();
+    }
+
+    async function saveUser(userId) {
+      await adminApi(`/admin/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fullName: document.getElementById(`user-full-${userId}`).value,
+          cityName: document.getElementById(`user-city-${userId}`).value,
+          status: document.getElementById(`user-status-${userId}`).value,
+          telegramChatId: document.getElementById(`user-chat-${userId}`).value,
+          balance: Number(document.getElementById(`user-balance-${userId}`).value || 0),
+          trialRidesRemaining: Number(document.getElementById(`user-trials-${userId}`).value || 0),
+          accessNote: document.getElementById(`user-note-${userId}`).value
+        })
+      });
+      loadAll();
+    }
+
+    async function toggleRideAccess(userId, enabled) {
+      await adminApi(`/admin/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          rideAccessEnabled: enabled,
+          accessRequestedAt: enabled ? null : undefined
+        })
+      });
+      loadAll();
+    }
+
+    async function setUserTrials(userId, count) {
+      await adminApi(`/admin/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ trialRidesRemaining: count })
+      });
+      loadAll();
+    }
+
+    async function clearUserAccessRequest(userId) {
+      await adminApi(`/admin/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ accessRequestedAt: null })
+      });
+      loadAll();
+    }
+
+    async function saveSettings() {
+      await adminApi("/admin/app-settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          supportPhone: document.getElementById("supportPhone").value,
+          supportTelegram: document.getElementById("supportTelegram").value,
+          accessRequestTelegram: document.getElementById("accessRequestTelegram").value,
+          loginDeliveryMode: document.getElementById("loginDeliveryMode").value,
+          defaultLanguage: document.getElementById("defaultLanguage").value,
+          currencySymbol: document.getElementById("currencySymbol").value,
+          newUserBonusBalance: Number(document.getElementById("newUserBonusBalance").value || 0),
+          trialRideCount: Number(document.getElementById("trialRideCount").value || 0),
+          minimumTopUpAmount: Number(document.getElementById("minimumTopUpAmount").value || 0),
+          shareUrl: document.getElementById("shareUrl").value,
+          maintenanceMode: document.getElementById("maintenanceMode").value === "true"
+        })
+      });
+      loadAll();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    document.addEventListener("change", (event) => {
+      if (event.target && event.target.id === "busCity") {
+        renderBusTariffOptions(event.target.value);
+      }
+      if (event.target && event.target.id === "fleetCityFilter") {
+        state.fleetCityFilter = event.target.value;
+        renderBusForm();
+      }
+    });
+
+    document.addEventListener("input", (event) => {
+      if (event.target && event.target.id === "fleetQuery") {
+        state.fleetQuery = event.target.value;
+        renderBusForm();
+      }
+    });
+
+    renderScaffold();
+    loadAll().catch((error) => {
+      document.getElementById("stats").innerHTML = `<div class="chip">Error: ${escapeHtml(error.message)}</div>`;
+    });
+  </script>
+</body>
+</html>

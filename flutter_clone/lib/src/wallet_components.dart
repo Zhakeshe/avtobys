@@ -24,7 +24,7 @@ class WalletOverviewCard extends StatelessWidget {
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF2E74FF), Color(0xFF1E54F5)],
+            colors: [Color(0xFF0070FF), Color(0xFF0055E6)],
           ),
           boxShadow: appCardShadow,
         ),
@@ -108,15 +108,33 @@ class WalletCardsTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: const Color(0xFFF1F4F9), width: 1.5),
+          border: Border.all(
+            color: walletState.cards.isEmpty
+                ? const Color(0xFFD0D8E6)
+                : const Color(0xFFF1F4F9),
+            width: walletState.cards.isEmpty ? 2 : 1.5,
+          ),
+          boxShadow: walletState.cards.isEmpty
+              ? const [
+                  BoxShadow(
+                    color: Color(0x080D1B2A),
+                    blurRadius: 14,
+                    offset: Offset(0, 5),
+                  ),
+                ]
+              : null,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 20),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.add_rounded,
-              color: Color(0xFFC0C7D8),
+            Icon(
+              walletState.cards.isEmpty
+                  ? Icons.add_circle_outline_rounded
+                  : Icons.add_rounded,
+              color: walletState.cards.isEmpty
+                  ? const Color(0xFF9EA8BC)
+                  : const Color(0xFFC0C7D8),
               size: 38,
             ),
             const SizedBox(height: 12),

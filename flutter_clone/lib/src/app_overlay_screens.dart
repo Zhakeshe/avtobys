@@ -2,9 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'activity_history.dart';
+import 'app_prefs.dart';
 import 'data.dart';
+import 'l10n/app_strings.dart';
 import 'theme.dart';
 import 'transport_api.dart';
 import 'wallet_store.dart';
@@ -40,10 +44,12 @@ class RoutesTabScreen extends StatefulWidget {
     super.key,
     required this.city,
     required this.onOpenCity,
+    this.uiStrings,
   });
 
   final String city;
   final VoidCallback onOpenCity;
+  final AppStrings? uiStrings;
 
   @override
   State<RoutesTabScreen> createState() => _RoutesTabScreenState();
@@ -51,14 +57,65 @@ class RoutesTabScreen extends StatefulWidget {
 
 class _RoutesTabScreenState extends State<RoutesTabScreen> {
   final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
   bool _loading = true;
   String _error = '';
+  String? _cityId;
   List<BusDto> _buses = const [];
+  List<BusDto> _serverHits = const [];
+  bool _serverSearchLoading = false;
 
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(_onSearchChanged);
     _loadRoutes();
+  }
+
+  void _onSearchChanged() {
+    _searchDebounce?.cancel();
+    final q = _searchController.text.trim();
+    if (_cityId == null || _cityId!.isEmpty) {
+      setState(() {});
+      return;
+    }
+    if (q.length < 2) {
+      setState(() {
+        _serverHits = const [];
+        _serverSearchLoading = false;
+      });
+      return;
+    }
+    setState(() {
+      _serverSearchLoading = true;
+    });
+    _searchDebounce = Timer(const Duration(milliseconds: 340), () async {
+      final cityId = _cityId;
+      if (cityId == null || !mounted) {
+        return;
+      }
+      try {
+        final hits = await TransportApi.getBuses(cityId, number: q.toUpperCase());
+        if (!mounted) {
+          return;
+        }
+        if (_searchController.text.trim() != q) {
+          return;
+        }
+        setState(() {
+          _serverHits = hits;
+          _serverSearchLoading = false;
+        });
+      } catch (_) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _serverHits = const [];
+          _serverSearchLoading = false;
+        });
+      }
+    });
   }
 
   @override
@@ -71,6 +128,8 @@ class _RoutesTabScreenState extends State<RoutesTabScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     super.dispose();
   }
@@ -95,6 +154,7 @@ class _RoutesTabScreenState extends State<RoutesTabScreen> {
         return;
       }
       setState(() {
+        _cityId = city.id;
         _buses = buses;
         _loading = false;
       });
@@ -111,17 +171,23 @@ class _RoutesTabScreenState extends State<RoutesTabScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final query = _searchController.text.trim().toLowerCase();
-    final filtered = query.isEmpty
-        ? _buses
-        : _buses
-              .where(
-                (bus) =>
-                    bus.number.toLowerCase().contains(query) ||
-                    bus.routeNumber.toLowerCase().contains(query) ||
-                    bus.tariffName.toLowerCase().contains(query),
-              )
-              .toList();
+    final query = _searchController.text.trim();
+    final queryLower = query.toLowerCase();
+    final List<BusDto> filtered;
+    if (query.length >= 2 && _serverHits.isNotEmpty) {
+      filtered = _serverHits;
+    } else if (query.isEmpty) {
+      filtered = _buses;
+    } else {
+      filtered = _buses
+          .where(
+            (bus) =>
+                bus.number.toLowerCase().contains(queryLower) ||
+                bus.routeNumber.toLowerCase().contains(queryLower) ||
+                bus.tariffName.toLowerCase().contains(queryLower),
+          )
+          .toList();
+    }
 
     return RefreshIndicator(
       onRefresh: _loadRoutes,
@@ -131,12 +197,39 @@ class _RoutesTabScreenState extends State<RoutesTabScreen> {
         child: Column(
           children: [
             _CitySelector(city: widget.city, onTap: widget.onOpenCity),
+            if (TransportApi.lastBusesFromOfflineCache &&
+                !_loading &&
+                _error.isEmpty &&
+                _buses.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceMuted,
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Text(
+                  widget.uiStrings?.offlineDataBanner ??
+                      const AppStrings(AppLanguage.ru).offlineDataBanner,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    height: 1.35,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             _SearchField(
               controller: _searchController,
               hintText: 'Поиск маршрута или номера',
               onChanged: (_) => setState(() {}),
             ),
+            if (_serverSearchLoading && query.length >= 2) ...[
+              const SizedBox(height: 10),
+              const LinearProgressIndicator(minHeight: 3),
+            ],
             const SizedBox(height: 20),
             if (_loading)
               const Padding(
@@ -843,6 +936,7 @@ class TransfersOverlay extends StatelessWidget {
 class SettingsOverlay extends StatefulWidget {
   const SettingsOverlay({
     super.key,
+    required this.appPrefs,
     required this.phoneNumber,
     required this.city,
     required this.walletState,
@@ -859,6 +953,7 @@ class SettingsOverlay extends StatefulWidget {
     required this.onRequestTelegramBind,
   });
 
+  final AppPrefsController appPrefs;
   final String phoneNumber;
   final String city;
   final WalletState walletState;
@@ -883,6 +978,82 @@ class _SettingsOverlayState extends State<SettingsOverlay> {
   bool _bindingTelegram = false;
   String _message = '';
   TelegramBindDto? _telegramBind;
+  String _appVersion = '';
+
+  @override
+  void initState() {
+    super.initState();
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) {
+        setState(() {
+          _appVersion = '${info.version}+${info.buildNumber}';
+        });
+      }
+    });
+  }
+
+  Future<void> _showHistory() async {
+    final items = await ActivityHistory.listEntries();
+    if (!mounted) {
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final s = widget.appPrefs.strings;
+        return SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        s.historyTitle,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        await ActivityHistory.clear();
+                        if (ctx.mounted) {
+                          Navigator.pop(ctx);
+                        }
+                      },
+                      child: Text(s.historyClear),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: items.isEmpty
+                    ? Center(child: Text(s.historyEmpty))
+                    : ListView.separated(
+                        itemCount: items.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (_, i) {
+                          final e = items[i];
+                          return ListTile(
+                            title: Text(e.title),
+                            subtitle: Text('${e.subtitle}\n${e.atIso}'),
+                            isThreeLine: true,
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   Future<void> _requestAccess() async {
     if (_requesting) {
@@ -1111,6 +1282,101 @@ class _SettingsOverlayState extends State<SettingsOverlay> {
                   message: _message,
                   background: const Color(0xFFE9F1FF),
                   color: AppColors.primaryBlueDark,
+                ),
+              ],
+              const SizedBox(height: 20),
+              ListenableBuilder(
+                listenable: widget.appPrefs,
+                builder: (context, _) {
+                  final s = widget.appPrefs.strings;
+                  final lang = widget.appPrefs.language;
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          s.languageLabel,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SegmentedButton<AppLanguage>(
+                          showSelectedIcon: false,
+                          segments: [
+                            ButtonSegment(
+                              value: AppLanguage.kk,
+                              label: Text('Қазақша', style: TextStyle(fontSize: 13 * widget.appPrefs.textScale)),
+                            ),
+                            ButtonSegment(
+                              value: AppLanguage.ru,
+                              label: Text('Русский', style: TextStyle(fontSize: 13 * widget.appPrefs.textScale)),
+                            ),
+                            ButtonSegment(
+                              value: AppLanguage.en,
+                              label: Text('English', style: TextStyle(fontSize: 13 * widget.appPrefs.textScale)),
+                            ),
+                          ],
+                          selected: {lang},
+                          onSelectionChanged: (next) {
+                            if (next.isEmpty) {
+                              return;
+                            }
+                            widget.appPrefs.setLanguage(next.first);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          s.textSizeLabel,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SegmentedButton<String>(
+                          showSelectedIcon: false,
+                          segments: [
+                            ButtonSegment(value: 'normal', label: Text(s.textSizeNormal)),
+                            ButtonSegment(value: 'large', label: Text(s.textSizeLarge)),
+                            ButtonSegment(value: 'xlarge', label: Text(s.textSizeExtraLarge)),
+                          ],
+                          selected: {widget.appPrefs.textScaleBucket},
+                          onSelectionChanged: (next) {
+                            if (next.isEmpty) {
+                              return;
+                            }
+                            widget.appPrefs.setTextScaleBucket(next.first);
+                          },
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              _OverlayListRow(
+                title: widget.appPrefs.strings.historyTitle,
+                icon: Icons.history_rounded,
+                color: const Color(0xFFF0F4FF),
+                onTap: _showHistory,
+              ),
+              if (_appVersion.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  widget.appPrefs.strings.appVersionLine(_appVersion),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
                 ),
               ],
               const Spacer(),

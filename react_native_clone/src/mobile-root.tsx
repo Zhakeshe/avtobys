@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { SafeAreaView, StyleSheet, View } from "react-native";
 
 import {
@@ -38,6 +38,7 @@ import {
   RoutesTab,
 } from "./mobile-ui-v2";
 import { colors } from "./theme";
+import { WebAppFrame } from "./web-app-frame";
 import {
   emptyWalletState,
   getActiveCard,
@@ -243,21 +244,19 @@ export default function MobileRoot() {
     await refreshSession();
   };
 
-  if (loading) {
-    return <SafeAreaView style={styles.loading} />;
-  }
+  let content: ReactNode;
 
-  if (overlay === "login") {
-    return (
+  if (loading) {
+    content = <SafeAreaView style={styles.loading} />;
+  } else if (overlay === "login") {
+    content = (
       <LoginScreen
         onRequestCode={handleRequestCode}
         onVerifyCode={handleVerifyCode}
       />
     );
-  }
-
-  if (overlay === "city") {
-    return (
+  } else if (overlay === "city") {
+    content = (
       <CityScreen
         selectedCity={currentCity}
         showBack={Boolean(selectedCity && sessionToken)}
@@ -265,23 +264,17 @@ export default function MobileRoot() {
         onSelectCity={(value) => void saveCity(value)}
       />
     );
-  }
-
-  if (overlay === "payments") {
-    return (
+  } else if (overlay === "payments") {
+    content = (
       <PaymentsScreen
         onBack={() => setOverlay(null)}
         onOpenTransfers={() => setOverlay("transfers")}
       />
     );
-  }
-
-  if (overlay === "transfers") {
-    return <TransfersScreen onBack={() => setOverlay(null)} />;
-  }
-
-  if (overlay === "bluetooth") {
-    return (
+  } else if (overlay === "transfers") {
+    content = <TransfersScreen onBack={() => setOverlay(null)} />;
+  } else if (overlay === "bluetooth") {
+    content = (
       <BluetoothScannerScreen
         phoneNumber={currentPhone}
         cityName={currentCity}
@@ -291,10 +284,8 @@ export default function MobileRoot() {
         onPaid={(amount) => void refreshWalletAfterPayment(amount)}
       />
     );
-  }
-
-  if (overlay === "plate") {
-    return (
+  } else if (overlay === "plate") {
+    content = (
       <BusSearchScreen
         mode="plate"
         phoneNumber={currentPhone}
@@ -305,10 +296,8 @@ export default function MobileRoot() {
         onPaid={(amount) => void refreshWalletAfterPayment(amount)}
       />
     );
-  }
-
-  if (overlay === "settings") {
-    return (
+  } else if (overlay === "settings") {
+    content = (
       <SettingsScreen
         phoneNumber={currentPhone}
         city={currentCity}
@@ -322,10 +311,8 @@ export default function MobileRoot() {
         onRequestAccess={() => void requestAccess()}
       />
     );
-  }
-
-  if (overlay === "cards") {
-    return (
+  } else if (overlay === "cards") {
+    content = (
       <CardsScreen
         walletState={walletState}
         onBack={() => setOverlay(null)}
@@ -335,10 +322,8 @@ export default function MobileRoot() {
         onSetActiveCard={(cardId) => void setActiveCard(cardId)}
       />
     );
-  }
-
-  if (overlay === "topup") {
-    return (
+  } else if (overlay === "topup") {
+    content = (
       <TopUpScreen
         balance={walletState.balance}
         activeCard={activeCard}
@@ -346,14 +331,10 @@ export default function MobileRoot() {
         onTopUp={(amount, targetType) => void topUpBalance(amount, targetType)}
       />
     );
-  }
-
-  if (overlay === "tickets") {
-    return <TicketsScreen phoneNumber={currentPhone} onBack={() => setOverlay(null)} />;
-  }
-
-  if (activeTab === "qr") {
-    return (
+  } else if (overlay === "tickets") {
+    content = <TicketsScreen phoneNumber={currentPhone} onBack={() => setOverlay(null)} />;
+  } else if (activeTab === "qr") {
+    content = (
       <QrScannerPaymentScreen
         phoneNumber={currentPhone}
         cityName={currentCity}
@@ -363,51 +344,53 @@ export default function MobileRoot() {
         onPaid={(amount) => void refreshWalletAfterPayment(amount)}
       />
     );
+  } else {
+    content = (
+      <View style={styles.app}>
+        <StatusBar style="dark" />
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.screenShell}>
+            {activeTab === "home" && (
+              <HomeTab
+                walletState={walletState}
+                onOpenQr={() => openTab("qr")}
+                onOpenBluetooth={() => setOverlay("bluetooth")}
+                onOpenPlate={() => setOverlay("plate")}
+                onOpenPayments={() => setOverlay("payments")}
+                onOpenTransfers={() => setOverlay("transfers")}
+                onOpenTickets={() => setOverlay("tickets")}
+                onOpenCards={() => setOverlay("cards")}
+                onOpenTopUp={() => setOverlay("topup")}
+              />
+            )}
+            {activeTab === "routes" && (
+              <RoutesTab city={currentCity} onOpenCity={() => setOverlay("city")} />
+            )}
+            {activeTab === "notifications" && (
+              <NotificationsTab onBack={() => openTab("menu")} />
+            )}
+            {activeTab === "menu" && (
+              <MenuTab
+                city={currentCity}
+                bankCardSubtitle={activeCard ? maskCardNumber(activeCard.number) : "Добавить карту"}
+                onOpenNotifications={() => openTab("notifications")}
+                onOpenCity={() => setOverlay("city")}
+                onOpenSettings={() => setOverlay("settings")}
+                onOpenCards={() => setOverlay("cards")}
+              />
+            )}
+          </View>
+        </SafeAreaView>
+        <BottomBar
+          activeTab={activeTab}
+          onOpenTab={openTab}
+          onOpenQr={() => openTab("qr")}
+        />
+      </View>
+    );
   }
 
-  return (
-    <View style={styles.app}>
-      <StatusBar style="dark" />
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.screenShell}>
-          {activeTab === "home" && (
-            <HomeTab
-              walletState={walletState}
-              onOpenQr={() => openTab("qr")}
-              onOpenBluetooth={() => setOverlay("bluetooth")}
-              onOpenPlate={() => setOverlay("plate")}
-              onOpenPayments={() => setOverlay("payments")}
-              onOpenTransfers={() => setOverlay("transfers")}
-              onOpenTickets={() => setOverlay("tickets")}
-              onOpenCards={() => setOverlay("cards")}
-              onOpenTopUp={() => setOverlay("topup")}
-            />
-          )}
-          {activeTab === "routes" && (
-            <RoutesTab city={currentCity} onOpenCity={() => setOverlay("city")} />
-          )}
-          {activeTab === "notifications" && (
-            <NotificationsTab onBack={() => openTab("menu")} />
-          )}
-          {activeTab === "menu" && (
-            <MenuTab
-              city={currentCity}
-              bankCardSubtitle={activeCard ? maskCardNumber(activeCard.number) : "Добавить карту"}
-              onOpenNotifications={() => openTab("notifications")}
-              onOpenCity={() => setOverlay("city")}
-              onOpenSettings={() => setOverlay("settings")}
-              onOpenCards={() => setOverlay("cards")}
-            />
-          )}
-        </View>
-      </SafeAreaView>
-      <BottomBar
-        activeTab={activeTab}
-        onOpenTab={openTab}
-        onOpenQr={() => openTab("qr")}
-      />
-    </View>
-  );
+  return <WebAppFrame>{content}</WebAppFrame>;
 }
 
 const styles = StyleSheet.create({

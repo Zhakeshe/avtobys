@@ -5,6 +5,9 @@ const express = require("express");
 const path = require("path");
 
 dotenv.config({ path: path.join(__dirname, ".env") });
+if (process.env.AVTOBYS_MEMORY_DB === "1") {
+  delete process.env.DATABASE_URL;
+}
 
 const {
   getClient,

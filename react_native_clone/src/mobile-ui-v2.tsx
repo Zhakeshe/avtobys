@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { getBuses, getCities, type BusDto } from "./api";
 import {
@@ -16,6 +16,8 @@ import {
 } from "./mobile-data";
 import { colors, shadow } from "./theme";
 import { formatBalance, maskCardNumber, type WalletState } from "./wallet-store";
+
+const webPointer = Platform.select({ web: { cursor: "pointer" as const }, default: undefined });
 
 type TabKey = "home" | "routes" | "qr" | "notifications" | "menu";
 
@@ -362,7 +364,7 @@ export function BottomBar({
         <BottomBarItem label="Уведомления" icon="notifications-none" selected={activeTab === "notifications"} onPress={() => onOpenTab("notifications")} />
         <BottomBarItem label="Меню" icon="menu" selected={activeTab === "menu"} onPress={() => onOpenTab("menu")} />
       </View>
-      <Pressable style={styles.qrButton} onPress={onOpenQr}>
+      <Pressable style={[styles.qrButton, webPointer]} onPress={onOpenQr}>
         <MaterialIcons name="qr-code-scanner" size={32} color="#FFFFFF" />
       </Pressable>
     </View>
@@ -440,7 +442,7 @@ function BottomBarItem({
   onPress: () => void;
 }) {
   return (
-    <Pressable style={styles.bottomItem} onPress={onPress}>
+    <Pressable style={[styles.bottomItem, webPointer]} onPress={onPress}>
       <MaterialIcons name={icon as never} size={28} color={selected ? colors.primaryBlue : colors.textSecondary} />
       <Text style={[styles.bottomItemLabel, selected && styles.bottomItemLabelSelected]}>{label}</Text>
     </Pressable>

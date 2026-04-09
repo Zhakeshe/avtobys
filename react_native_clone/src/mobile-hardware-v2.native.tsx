@@ -2,8 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { MaterialIcons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { BleManager, type Device, State } from "react-native-ble-plx";
-import QRCode from "react-native-qrcode-svg";
-import { Modal, NativeModules, PermissionsAndroid, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { NativeModules, PermissionsAndroid, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import {
   addBus,
@@ -16,6 +15,7 @@ import {
   type TariffDto,
   type TicketDto,
 } from "./api";
+import { TicketModal } from "./mobile-ticket-modal";
 import { colors, shadow } from "./theme";
 import { formatBalance, type WalletCardData } from "./wallet-store";
 
@@ -268,7 +268,11 @@ export function BluetoothScannerScreen(props: HardwareProps) {
         </ScrollView>
       ) : null}
 
-      <TicketModal ticket={ticket} onClose={() => setTicket(null)} />
+      <TicketModal
+        ticket={ticket}
+        onClose={() => setTicket(null)}
+        labels={{ transportCaption: "Нөмір транспорта", ticketTitle: "Менің билетім" }}
+      />
     </View>
   );
 }
@@ -361,6 +365,8 @@ export function QrScannerPaymentScreen(props: HardwareProps) {
         style={StyleSheet.absoluteFill}
         facing="back"
         enableTorch={flash}
+        videoStabilizationMode="standard"
+        barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
         onBarcodeScanned={async ({ data }) => {
           if (scanned || !cityId) {
             return;
@@ -404,7 +410,11 @@ export function QrScannerPaymentScreen(props: HardwareProps) {
           {error ? <Text style={styles.errorOnDark}>{error}</Text> : null}
         </View>
       </SafeAreaView>
-      <TicketModal ticket={ticket} onClose={() => setTicket(null)} />
+      <TicketModal
+        ticket={ticket}
+        onClose={() => setTicket(null)}
+        labels={{ transportCaption: "Нөмір транспорта", ticketTitle: "Менің билетім" }}
+      />
     </View>
   );
 }
@@ -503,13 +513,6 @@ function PrimaryButton({ label, disabled, onPress }: { label: string; disabled: 
 function RoundButton({ icon, onPress }: { icon: string; onPress: () => void }) {
   return <Pressable style={styles.round} onPress={onPress}><MaterialIcons name={icon as never} size={24} color="#FFF" /></Pressable>;
 }
-function TicketModal({ ticket, onClose }: { ticket: TicketDto | null; onClose: () => void }) {
-  return <Modal visible={Boolean(ticket)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}>{ticket ? <View style={styles.modalCard}><Pressable style={styles.modalClose} onPress={onClose}><MaterialIcons name="close" size={20} color={colors.textSecondary} /></Pressable><Text style={styles.modalCaption}>Нөмір транспорта</Text><Text style={styles.modalNumber}>{ticket.busNumber}</Text><View style={styles.qrWrap}><QRCode value={ticket.qrValue} size={180} /></View><Text style={styles.modalTitle}>Менің билетім</Text><View style={styles.grid}><TicketStat label="Қала" value={ticket.cityName} /><TicketStat label="Төлем күні" value="Бүгін" /><TicketStat label="Маршрут" value={ticket.routeNumber} /><TicketStat label="Жол ақысы" value={`${ticket.amount} ₸`} /><TicketStat label="Тариф" value={ticket.tariffName} /><TicketStat label="Жарамды дейін" value={new Date(ticket.validUntil).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })} /></View></View> : null}</View></Modal>;
-}
-function TicketStat({ label, value }: { label: string; value: string }) {
-  return <View style={styles.stat}><Text style={styles.statLabel}>{label}</Text><Text style={styles.statValue}>{value}</Text></View>;
-}
-
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   screen: { flex: 1, backgroundColor: "#FFF", paddingHorizontal: 24, paddingBottom: 24 },
@@ -566,15 +569,4 @@ const styles = StyleSheet.create({
   hintText: { color: "#D7DCEC", fontSize: 15 },
   bottom: { marginTop: "auto", paddingHorizontal: 24, paddingBottom: 34 },
   sheet: { backgroundColor: "#FFF", borderRadius: 24, padding: 20, ...shadow },
-  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.28)", alignItems: "center", justifyContent: "center", padding: 20 },
-  modalCard: { width: "100%", maxWidth: 420, borderRadius: 28, backgroundColor: "#FFF", padding: 24, ...shadow },
-  modalClose: { alignSelf: "flex-end" },
-  modalCaption: { textAlign: "center", fontSize: 15, color: colors.textSecondary },
-  modalNumber: { marginTop: 4, textAlign: "center", fontSize: 28, fontWeight: "700", color: colors.textPrimary },
-  qrWrap: { alignItems: "center", marginVertical: 20 },
-  modalTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary, marginBottom: 12 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  stat: { width: "47%" },
-  statLabel: { fontSize: 13, color: colors.textSecondary },
-  statValue: { marginTop: 4, fontSize: 16, fontWeight: "600", color: colors.textPrimary },
 });

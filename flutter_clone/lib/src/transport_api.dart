@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'offline_cache.dart';
 import 'wallet_store.dart';
 
 class ApiException implements Exception {
@@ -401,6 +402,9 @@ class RideAccessRequestDto {
 class TransportApi {
   static String? _sessionToken;
 
+  static bool lastBusesFromOfflineCache = false;
+  static bool lastTicketsFromOfflineCache = false;
+
   static String get baseUrl {
     const configured = String.fromEnvironment('AVTOBUS_API_URL');
     if (configured.isNotEmpty) {
@@ -632,16 +636,55 @@ class TransportApi {
     String number = '',
     String qrToken = '',
   }) async {
-    final response = await _requestList(
-      '/buses',
-      queryParameters: {
-        'cityId': cityId,
-        if (number.isNotEmpty) 'number': number,
-        if (qrToken.isNotEmpty) 'qrToken': qrToken,
-      },
-      omitAuth: true,
-    );
-    return response.map(BusDto.fromJson).toList();
+    lastBusesFromOfflineCache = false;
+    final uri = _uri('/buses', {
+      'cityId': cityId,
+      if (number.isNotEmpty) 'number': number,
+      if (qrToken.isNotEmpty) 'qrToken': qrToken,
+    });
+    try {
+      final response = await http.get(uri, headers: _headers(omitAuth: true));
+      final rows = _decodeList(response);
+      await OfflineCache.saveBusList(
+        cityId,
+        number: number,
+        qrToken: qrToken,
+        raw: rows,
+      );
+      return rows.map(BusDto.fromJson).toList();
+    } catch (_) {
+      final cached = await OfflineCache.loadBusList(
+        cityId,
+        number: number,
+        qrToken: qrToken,
+      );
+      if (cached != null && cached.isNotEmpty) {
+        lastBusesFromOfflineCache = true;
+        var buses = cached.map(BusDto.fromJson).toList();
+        if (number.isNotEmpty) {
+          final n = number.toUpperCase();
+          buses = buses
+              .where(
+                (b) =>
+                    b.number.toUpperCase().contains(n) ||
+                    b.validatorName.toUpperCase().contains(n),
+              )
+              .toList();
+        } else if (qrToken.isNotEmpty) {
+          final t = qrToken.trim();
+          buses = buses
+              .where(
+                (b) =>
+                    b.qrToken == t ||
+                    b.number.contains(t) ||
+                    b.validatorName.contains(t),
+              )
+              .toList();
+        }
+        return buses;
+      }
+      rethrow;
+    }
   }
 
   static Future<BusDto> addBus({
@@ -666,11 +709,30 @@ class TransportApi {
   }
 
   static Future<List<TicketDto>> getTickets([String phoneNumber = '']) async {
-    final response = await _requestList(
+    lastTicketsFromOfflineCache = false;
+    final phoneKey = OfflineCache.normalizePhoneKey(phoneNumber);
+    final uri = _uri(
       '/tickets',
-      queryParameters: phoneNumber.isEmpty ? null : {'phone': phoneNumber},
+      phoneNumber.isEmpty ? null : {'phone': phoneNumber},
     );
-    return response.map(TicketDto.fromJson).toList();
+    try {
+      final response = await http.get(uri, headers: _headers(omitAuth: false));
+      final rows = _decodeList(response);
+      if (phoneKey.isNotEmpty) {
+        await OfflineCache.saveTicketList(phoneKey, rows);
+      }
+      return rows.map(TicketDto.fromJson).toList();
+    } catch (_) {
+      if (phoneKey.isEmpty) {
+        rethrow;
+      }
+      final cached = await OfflineCache.loadTicketList(phoneKey);
+      if (cached != null && cached.isNotEmpty) {
+        lastTicketsFromOfflineCache = true;
+        return cached.map(TicketDto.fromJson).toList();
+      }
+      rethrow;
+    }
   }
 
   static Future<TicketDto> createTicket({

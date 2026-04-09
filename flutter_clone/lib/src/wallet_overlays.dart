@@ -89,6 +89,12 @@ class _TopUpOverlayState extends State<TopUpOverlay> {
         targetType: _targetType,
         transportCardId: _transportCardId,
       );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _submitting = false;
+      });
     } catch (error) {
       if (!mounted) {
         return;
@@ -395,6 +401,9 @@ class _CardsOverlayState extends State<CardsOverlay> {
   Future<void> _activate(String cardId) async {
     try {
       await widget.onSetActiveCard(cardId);
+      if (!mounted) {
+        return;
+      }
     } catch (error) {
       if (!mounted) {
         return;

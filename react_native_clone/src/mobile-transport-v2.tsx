@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { MaterialIcons } from "@expo/vector-icons";
-import QRCode from "react-native-qrcode-svg";
 import {
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -23,6 +21,7 @@ import {
   type TariffDto,
   type TicketDto,
 } from "./api";
+import { TicketModal } from "./mobile-ticket-modal";
 import { colors, shadow } from "./theme";
 import { formatBalance, type WalletCardData } from "./wallet-store";
 
@@ -68,7 +67,11 @@ export function TicketsScreen({
         )}
       </ScrollView>
 
-      <TicketModal ticket={selectedTicket} onClose={() => setSelectedTicket(null)} />
+      <TicketModal
+        ticket={selectedTicket}
+        onClose={() => setSelectedTicket(null)}
+        labels={{ transportCaption: "Номер транспорта", ticketTitle: "Мой билет" }}
+      />
     </View>
   );
 }
@@ -337,7 +340,11 @@ export function BusSearchScreen({
         </ScrollView>
       ) : null}
 
-      <TicketModal ticket={ticket} onClose={() => setTicket(null)} />
+      <TicketModal
+        ticket={ticket}
+        onClose={() => setTicket(null)}
+        labels={{ transportCaption: "Номер транспорта", ticketTitle: "Мой билет" }}
+      />
     </View>
   );
 }
@@ -412,57 +419,6 @@ function InfoLine({
     <View style={styles.infoLine}>
       <Text style={styles.infoLabel}>{label}</Text>
       <Text style={[styles.infoValue, emphasized && styles.infoValueEmphasized]}>{value}</Text>
-    </View>
-  );
-}
-
-function TicketModal({
-  ticket,
-  onClose,
-}: {
-  ticket: TicketDto | null;
-  onClose: () => void;
-}) {
-  return (
-    <Modal visible={Boolean(ticket)} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        {ticket ? (
-          <View style={styles.ticketModal}>
-            <Pressable style={styles.modalClose} onPress={onClose}>
-              <MaterialIcons name="close" size={20} color={colors.textSecondary} />
-            </Pressable>
-            <Text style={styles.transportTitle}>Номер транспорта</Text>
-            <Text style={styles.transportNumber}>{ticket.busNumber}</Text>
-            <View style={styles.qrWrap}>
-              <QRCode value={ticket.qrValue} size={180} />
-            </View>
-            <Text style={styles.modalMainTitle}>Мой билет</Text>
-            <View style={styles.ticketGrid}>
-              <TicketStat label="Қала" value={ticket.cityName} />
-              <TicketStat label="Төлем күні" value="Бүгін" />
-              <TicketStat label="Маршрут" value={ticket.routeNumber} />
-              <TicketStat label="Жол ақысы" value={`${ticket.amount} ₸`} />
-              <TicketStat label="Тариф" value={ticket.tariffName} />
-              <TicketStat
-                label="Жарамды дейін"
-                value={new Date(ticket.validUntil).toLocaleTimeString("ru-RU", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              />
-            </View>
-          </View>
-        ) : null}
-      </View>
-    </Modal>
-  );
-}
-
-function TicketStat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
     </View>
   );
 }
@@ -554,17 +510,6 @@ const styles = StyleSheet.create({
   ticketRoute: { fontSize: 16, fontWeight: "700", color: colors.textPrimary },
   ticketMeta: { marginTop: 4, fontSize: 13, color: colors.textSecondary },
   ticketPrice: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
-  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.28)", alignItems: "center", justifyContent: "center", padding: 20 },
-  ticketModal: { width: "100%", maxWidth: 420, borderRadius: 28, backgroundColor: "#FFFFFF", padding: 24, ...shadow },
-  modalClose: { alignSelf: "flex-end" },
-  transportTitle: { textAlign: "center", fontSize: 15, color: colors.textSecondary },
-  transportNumber: { textAlign: "center", fontSize: 28, fontWeight: "700", color: colors.textPrimary, marginTop: 4 },
-  qrWrap: { alignItems: "center", marginVertical: 20 },
-  modalMainTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary, marginBottom: 12 },
-  ticketGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  stat: { width: "47%" },
-  statLabel: { fontSize: 13, color: colors.textSecondary },
-  statValue: { marginTop: 4, fontSize: 16, fontWeight: "600", color: colors.textPrimary },
   primaryButton: { height: 64, borderRadius: 18, backgroundColor: colors.primaryBlue, alignItems: "center", justifyContent: "center", marginTop: 20 },
   primaryButtonDisabled: { backgroundColor: "#C8C8C8" },
   primaryButtonLabel: { fontSize: 18, color: "#FFFFFF" },

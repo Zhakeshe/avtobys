@@ -1,9 +1,15 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_overlay_screens.dart';
+import 'app_prefs.dart';
+import 'pwa_context.dart';
+import 'pwa_install.dart';
 import 'data.dart';
+import 'l10n/app_strings.dart';
+import 'qr_scan_payment_screen.dart';
 import 'theme.dart';
 import 'transport_api.dart';
 import 'transport_overlays.dart';
@@ -23,6 +29,7 @@ class AvtobysCloneApp extends StatefulWidget {
 class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
       GlobalKey<ScaffoldMessengerState>();
+  final AppPrefsController _prefs = AppPrefsController();
   RootTab _selectedTab = RootTab.home;
   RootTab _lastContentTab = RootTab.home;
   bool _isLoading = true;
@@ -64,6 +71,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
   }
 
   Future<void> _bootstrap() async {
+    await _prefs.load();
     final preferences = await SharedPreferences.getInstance();
     final storedToken = preferences.getString('session_token');
     final storedCity = preferences.getString('selected_city');
@@ -156,8 +164,6 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     return Uri.base.scheme == 'https' || isLocalhost;
   }
 
-  bool get _isIOSWeb => kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-
   void _showRuntimeMessage(String message) {
     final messenger = _messengerKey.currentState;
     if (messenger == null) {
@@ -179,20 +185,16 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
   }
 
   void _openQrPayment() {
-    if (!_requireSecureContextForPayment('QR оплаты')) {
-      return;
+    if (kIsWeb && !_isSecureWebContext) {
+      _showRuntimeMessage(
+        'Камера в браузере доступна по HTTPS. Ниже можно ввести QR token вручную.',
+      );
     }
     _selectTab(RootTab.qr);
   }
 
   void _openBluetoothPayment() {
     if (!_requireSecureContextForPayment('Bluetooth оплаты')) {
-      return;
-    }
-    if (_isIOSWeb) {
-      _showRuntimeMessage(
-        'На iPhone Bluetooth в браузере не поддерживается. Используйте QR.',
-      );
       return;
     }
     _openOverlay(AppOverlay.bluetooth);
@@ -391,25 +393,54 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     return TransportApi.getTelegramBindStatus(phoneNumber: phoneNumber);
   }
 
+  Locale get _materialLocale {
+    return switch (_prefs.language) {
+      AppLanguage.kk => const Locale('ru'),
+      AppLanguage.ru => const Locale('ru'),
+      AppLanguage.en => const Locale('en'),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: _config.appName,
-      scaffoldMessengerKey: _messengerKey,
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: Colors.white,
-        colorScheme: ColorScheme.fromSeed(seedColor: AppColors.primaryBlue),
-        dividerColor: AppColors.border,
-      ),
-      home: _isLoading
-          ? const Scaffold(
-              body: Center(
-                child: CircularProgressIndicator(color: AppColors.primaryBlue),
-              ),
-            )
-          : _buildRootContent(),
+    return ListenableBuilder(
+      listenable: _prefs,
+      builder: (context, _) {
+        final baseTheme = ThemeData(
+          useMaterial3: true,
+          scaffoldBackgroundColor: Colors.white,
+          colorScheme: ColorScheme.fromSeed(seedColor: AppColors.primaryBlue),
+          dividerColor: AppColors.border,
+        );
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: _config.appName,
+          scaffoldMessengerKey: _messengerKey,
+          locale: _materialLocale,
+          supportedLocales: const [
+            Locale('en'),
+            Locale('ru'),
+          ],
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          theme: baseTheme.copyWith(
+            textTheme: baseTheme.textTheme.apply(
+              fontSizeFactor: _prefs.textScale,
+              fontSizeDelta: 0,
+            ),
+          ),
+          home: _isLoading
+              ? const Scaffold(
+                  body: Center(
+                    child: CircularProgressIndicator(color: AppColors.primaryBlue),
+                  ),
+                )
+              : _buildRootContent(),
+        );
+      },
     );
   }
 
@@ -419,9 +450,11 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     }
 
     if (_selectedTab == RootTab.qr) {
-      return TransportPaymentOverlay(
-        mode: TransportSearchMode.qr,
-        phoneNumber: _phoneNumber,
+      final qrPhone = _phoneNumber.isNotEmpty
+          ? _phoneNumber
+          : '+7 700-255-56-19';
+      return QrScanPaymentScreen(
+        phoneNumber: qrPhone,
         cityName: _currentCity,
         walletState: _walletState,
         rideAccessEnabled: _user?.rideAccessEnabled ?? false,
@@ -430,22 +463,92 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
         accessTelegram: _config.accessRequestTelegram,
         onBack: () => _selectTab(_lastContentTab),
         onSessionRefresh: _refreshSession,
+        allowSecureCameraContext: _isSecureWebContext,
+        uiStrings: _prefs.strings,
       );
     }
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Stack(
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Positioned.fill(
-            child: SafeArea(bottom: false, child: _buildScreen()),
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: BottomTabBar(
-              selectedTab: _selectedTab,
-              onTabSelected: _selectTab,
-              onCenterTap: _openQrPayment,
+          if (kIsWeb && !isPwaStandaloneMode)
+            Material(
+              color: const Color(0xFFE8F2FC),
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.install_mobile_rounded, color: Color(0xFF0D47A1)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _prefs.strings.pwaTitle,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15,
+                                color: Color(0xFF0B1F3A),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _prefs.strings.pwaBody,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                height: 1.35,
+                                color: Color(0xFF4A5C76),
+                              ),
+                            ),
+                            if (defaultTargetPlatform != TargetPlatform.iOS)
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton(
+                                  onPressed: () async {
+                                    final ok = await triggerPwaInstallPrompt();
+                                    if (!context.mounted) {
+                                      return;
+                                    }
+                                    if (ok) {
+                                      _showRuntimeMessage(
+                                        _prefs.language == AppLanguage.en
+                                            ? 'Installation accepted'
+                                            : 'Орнату расталды',
+                                      );
+                                    }
+                                  },
+                                  child: Text(_prefs.strings.pwaInstallChromeButton),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: SafeArea(bottom: false, child: _buildScreen()),
+                ),
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: BottomTabBar(
+                    selectedTab: _selectedTab,
+                    onTabSelected: _selectTab,
+                    onCenterTap: _openQrPayment,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -483,6 +586,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
         return RoutesTabScreen(
           city: city,
           onOpenCity: () => _openOverlay(AppOverlay.cityPicker),
+          uiStrings: _prefs.strings,
         );
       case RootTab.notifications:
         return NotificationsScreen(onBack: () => _selectTab(RootTab.menu));
@@ -544,6 +648,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
           accessTelegram: _config.accessRequestTelegram,
           onBack: _closeOverlay,
           onSessionRefresh: _refreshSession,
+          uiStrings: _prefs.strings,
         );
       case AppOverlay.plate:
         return TransportPaymentOverlay(
@@ -557,11 +662,16 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
           accessTelegram: _config.accessRequestTelegram,
           onBack: _closeOverlay,
           onSessionRefresh: _refreshSession,
+          uiStrings: _prefs.strings,
         );
       case AppOverlay.tickets:
-        return TicketsOverlay(onBack: _closeOverlay);
+        return TicketsOverlay(
+          onBack: _closeOverlay,
+          uiStrings: _prefs.strings,
+        );
       case AppOverlay.settings:
         return SettingsOverlay(
+          appPrefs: _prefs,
           phoneNumber: phoneNumber,
           city: city,
           walletState: _walletState,
@@ -1020,12 +1130,12 @@ class _ActionTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 16),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           boxShadow: const [
             BoxShadow(
-              color: Color(0x060D1B2A),
-              blurRadius: 10,
-              offset: Offset(0, 4),
+              color: Color(0x0C0D1B2A),
+              blurRadius: 16,
+              offset: Offset(0, 6),
             ),
           ],
         ),
@@ -1035,7 +1145,7 @@ class _ActionTile extends StatelessWidget {
               height: 48,
               width: 48,
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F6FF),
+                color: const Color(0xFFF0F5FF),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Icon(data.icon, color: AppColors.primaryBlue, size: 26),
@@ -1070,12 +1180,12 @@ class _ServiceTile extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           boxShadow: const [
             BoxShadow(
-              color: Color(0x080D1B2A),
-              blurRadius: 12,
-              offset: Offset(0, 4),
+              color: Color(0x0A0D1B2A),
+              blurRadius: 14,
+              offset: Offset(0, 5),
             ),
           ],
         ),
@@ -1087,7 +1197,7 @@ class _ServiceTile extends StatelessWidget {
               width: 48,
               decoration: BoxDecoration(
                 color: data.color.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
               ),
               child: Icon(
                 data.icon,

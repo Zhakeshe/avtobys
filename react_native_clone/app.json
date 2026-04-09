@@ -35,7 +35,9 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "backgroundColor": "#E6E9EF",
+      "bundler": "metro"
     },
     "plugins": [
       [

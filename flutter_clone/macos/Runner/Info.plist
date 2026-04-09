@@ -28,5 +28,7 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Приложению нужен доступ к камере для сканирования QR-кода оплаты проезда.</string>
 </dict>
 </plist>

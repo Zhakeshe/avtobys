@@ -1,6 +1,12 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import 'activity_history.dart';
+import 'bluetooth_web_pick.dart';
+import 'l10n/app_strings.dart';
 import 'theme.dart';
 import 'transport_api.dart';
 import 'wallet_store.dart';
@@ -13,9 +19,11 @@ class TicketsOverlay extends StatefulWidget {
   const TicketsOverlay({
     super.key,
     required this.onBack,
+    this.uiStrings,
   });
 
   final VoidCallback onBack;
+  final AppStrings? uiStrings;
 
   @override
   State<TicketsOverlay> createState() => _TicketsOverlayState();
@@ -62,7 +70,10 @@ class _TicketsOverlayState extends State<TicketsOverlay> {
     return showDialog<void>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.28),
-      builder: (context) => _TicketDialog(ticket: ticket),
+      builder: (context) => _TicketDialog(
+        ticket: ticket,
+        strings: widget.uiStrings ?? const AppStrings(AppLanguage.ru),
+      ),
     );
   }
 
@@ -77,6 +88,15 @@ class _TicketsOverlayState extends State<TicketsOverlay> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _OverlayHeader(title: 'Мои билеты', onBack: widget.onBack),
+              if (TransportApi.lastTicketsFromOfflineCache) ...[
+                const SizedBox(height: 12),
+                _InfoBox(
+                  message: widget.uiStrings?.offlineDataBanner ??
+                      'Офлайн: показаны сохранённые билеты',
+                  background: const Color(0xFFFFF8E6),
+                  color: const Color(0xFF6B4D00),
+                ),
+              ],
               const SizedBox(height: 18),
               const Text(
                 'Последние билеты',
@@ -160,7 +180,7 @@ class _TicketsOverlayState extends State<TicketsOverlay> {
                                             ),
                                           ),
                                           Text(
-                                            '- ${ticket.amount.toInt()} ₸',
+                                            '- ${formatBalance(ticket.amount)} ₸',
                                             style: const TextStyle(
                                               fontSize: 18,
                                               fontWeight: FontWeight.w700,
@@ -195,6 +215,8 @@ class TransportPaymentOverlay extends StatefulWidget {
     required this.accessTelegram,
     required this.onBack,
     required this.onSessionRefresh,
+    this.initialQrToken,
+    this.uiStrings,
   });
 
   final TransportSearchMode mode;
@@ -207,6 +229,11 @@ class TransportPaymentOverlay extends StatefulWidget {
   final VoidCallback onBack;
   final RefreshSessionCallback onSessionRefresh;
 
+  /// When set (QR flow after camera scan), skips manual token field and searches immediately.
+  final String? initialQrToken;
+
+  final AppStrings? uiStrings;
+
   @override
   State<TransportPaymentOverlay> createState() =>
       _TransportPaymentOverlayState();
@@ -215,7 +242,11 @@ class TransportPaymentOverlay extends StatefulWidget {
 class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
   final TextEditingController _queryController = TextEditingController();
   final TextEditingController _routeController = TextEditingController();
+  Timer? _searchDebounce;
 
+  AppStrings get _strings => widget.uiStrings ?? const AppStrings(AppLanguage.ru);
+
+  bool _allowQueryListener = false;
   bool _loading = true;
   bool _saving = false;
   String _error = '';
@@ -228,6 +259,9 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
   bool get _isPlate => widget.mode == TransportSearchMode.plate;
   bool get _isQr => widget.mode == TransportSearchMode.qr;
   bool get _isBluetooth => widget.mode == TransportSearchMode.bluetooth;
+
+  bool get _hideQrManualInput =>
+      _isQr && widget.initialQrToken != null && widget.initialQrToken!.trim().isNotEmpty;
 
   WalletCardData? get _transportCard {
     for (final card in widget.walletState.cards) {
@@ -246,14 +280,104 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
   @override
   void initState() {
     super.initState();
+    _queryController.addListener(_onQueryChanged);
     _loadInitialData();
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _queryController.removeListener(_onQueryChanged);
     _queryController.dispose();
     _routeController.dispose();
     super.dispose();
+  }
+
+  void _onQueryChanged() {
+    if (!_allowQueryListener || _isBluetooth) {
+      return;
+    }
+    _scheduleDebouncedSearch();
+  }
+
+  void _scheduleDebouncedSearch() {
+    if (!_isPlate && !_isQr) {
+      return;
+    }
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 360), () {
+      if (!mounted) {
+        return;
+      }
+      final q = _queryController.text.trim();
+      if (q.isEmpty) {
+        setState(() {
+          _buses = const [];
+          _selectedBus = null;
+          _error = '';
+          _loading = false;
+        });
+        return;
+      }
+      _search();
+    });
+  }
+
+  String _normalizeTransportToken(String value) {
+    return value.replaceAll(RegExp(r'[^0-9A-Za-z]'), '').toUpperCase();
+  }
+
+  Future<void> _pickWebBluetoothDevice() async {
+    if (!kIsWeb || _cityId.isEmpty) {
+      return;
+    }
+    setState(() {
+      _error = '';
+    });
+    final label = await pickBluetoothDeviceLabelWeb();
+    if (!mounted) {
+      return;
+    }
+    if (label == null || label.isEmpty) {
+      setState(() {
+        _error =
+            'Bluetooth құрылғысы таңдалмады немесе браузер Web Bluetooth қолдамайды (Chrome ұсынылады).';
+      });
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = '';
+      _selectedBus = null;
+    });
+
+    try {
+      final token = _normalizeTransportToken(label);
+      if (token.isEmpty) {
+        throw const ApiException('Құрылғы атауын тану мүмкін емес.');
+      }
+      final buses = await TransportApi.getBuses(_cityId, number: token);
+      if (!mounted) {
+        return;
+      }
+      final btFirst =
+          buses.where((b) => b.bluetoothEnabled).toList(growable: false);
+      final use = btFirst.isNotEmpty ? btFirst : buses;
+      setState(() {
+        _buses = use;
+        _selectedBus = use.isNotEmpty ? use.first : null;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = error.toString();
+      });
+    }
   }
 
   Future<void> _loadInitialData() async {
@@ -290,6 +414,10 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
         _selectedBus = buses.isNotEmpty ? buses.first : null;
         _loading = false;
       });
+      if (_hideQrManualInput) {
+        _queryController.text = widget.initialQrToken!.trim();
+        await _search();
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -298,6 +426,8 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
         _loading = false;
         _error = error.toString();
       });
+    } finally {
+      _allowQueryListener = true;
     }
   }
 
@@ -335,6 +465,14 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
         _selectedBus = buses.isNotEmpty ? buses.first : null;
         _loading = false;
       });
+      if (buses.isNotEmpty) {
+        final first = buses.first;
+        await ActivityHistory.add(
+          kind: 'bus_search',
+          title: '${_isQr ? 'QR' : _isPlate ? 'Нөмір' : 'BT'}: ${query.length > 32 ? '${query.substring(0, 32)}…' : query}',
+          subtitle: '${first.number} • ${first.routeNumber} • ${widget.cityName}',
+        );
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -451,10 +589,18 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
       setState(() {
         _saving = false;
       });
+      await ActivityHistory.add(
+        kind: 'ticket',
+        title: 'Төлем: ${selectedBus.number}',
+        subtitle: '${formatBalance(selectedBus.price)} ₸ • ${widget.cityName}',
+      );
+      if (!mounted) {
+        return;
+      }
       await showDialog<void>(
         context: context,
         barrierColor: Colors.black.withValues(alpha: 0.28),
-        builder: (context) => _TicketDialog(ticket: ticket),
+        builder: (context) => _TicketDialog(ticket: ticket, strings: _strings),
       );
     } on ApiException catch (error) {
       if (!mounted) {
@@ -522,6 +668,44 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
                   balance: widget.walletState.balance,
                   transportCard: _transportCard,
                 ),
+                if (kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) ...[
+                  const SizedBox(height: 14),
+                  const _InfoBox(
+                    message:
+                        'iPhone сафарида Web Bluetooth жоқ. Нөмір бойынша төлем немесе QR қолданыңыз.',
+                  ),
+                ],
+                if (kIsWeb && defaultTargetPlatform != TargetPlatform.iOS) ...[
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    height: 52,
+                    child: OutlinedButton.icon(
+                      onPressed: _loading ? null : _pickWebBluetoothDevice,
+                      icon: const Icon(Icons.bluetooth_searching_rounded),
+                      label: const Text(
+                        'Bluetooth құрылғысын браузерден таңдау',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Chrome Android / Windows / Mac: жүйе терезесінен құрылғыны таңдаңыз. Содан кейін тізімде автобус көрінеді.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.35,
+                      color: AppColors.textSecondary.withValues(alpha: 0.95),
+                    ),
+                  ),
+                ],
+              ],
+              if (_isBluetooth && _loading)
+                const Expanded(
+                  child: Center(
+                    child: _BluetoothSearchIndicator(),
+                  ),
+                )
+              else if (_isBluetooth) ...[
                 const SizedBox(height: 18),
                 const Text(
                   'Найденные валидаторы',
@@ -531,113 +715,256 @@ class _TransportPaymentOverlayState extends State<TransportPaymentOverlay> {
                     color: AppColors.textPrimary,
                   ),
                 ),
-              ] else ...[
-                const SizedBox(height: 24),
-                _RoundedInput(
-                  controller: _queryController,
-                  hintText: _searchHint,
-                  onChanged: (_) => setState(() {}),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: _paymentColumnChildren(walletActionLabel),
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 14),
-                _ActionButton(
-                  label: _isQr ? 'Найти автобус по QR token' : 'Далее',
-                  enabled: _queryController.text.trim().isNotEmpty && !_loading,
-                  onTap: _search,
+              ] else ...[
+                if (!_hideQrManualInput) ...[
+                  const SizedBox(height: 24),
+                  _RoundedInput(
+                    controller: _queryController,
+                    hintText: _searchHint,
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 14),
+                  _ActionButton(
+                    label: _isQr ? 'Найти автобус по QR token' : 'Далее',
+                    enabled: _queryController.text.trim().isNotEmpty && !_loading,
+                    onTap: _search,
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Expanded(
+                  child: _loading
+                      ? const Center(
+                          child: CircularProgressIndicator(color: AppColors.primaryBlue),
+                        )
+                      : SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: _paymentColumnChildren(walletActionLabel),
+                          ),
+                        ),
                 ),
               ],
-              const SizedBox(height: 16),
-              Expanded(
-                child: _loading
-                    ? const Center(
-                        child: CircularProgressIndicator(color: AppColors.primaryBlue),
-                      )
-                    : SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            ..._buses.map(
-                              (bus) => Padding(
-                                padding: const EdgeInsets.only(bottom: 14),
-                                child: _BusCard(
-                                  bus: bus,
-                                  selected: _selectedBus?.id == bus.id,
-                                  onTap: () {
-                                    setState(() {
-                                      _selectedBus = bus;
-                                    });
-                                  },
-                                ),
-                              ),
-                            ),
-                            if (!_isBluetooth &&
-                                _queryController.text.trim().isNotEmpty &&
-                                _buses.isEmpty &&
-                                _tariffs.isNotEmpty)
-                              _AddBusCard(
-                                routeController: _routeController,
-                                tariffs: _tariffs,
-                                selectedTariffId: _selectedTariffId,
-                                onSelectTariff: (value) {
-                                  setState(() {
-                                    _selectedTariffId = value;
-                                  });
-                                },
-                                onAddBus: _saving ? null : _addBus,
-                              ),
-                            if (_selectedBus != null) ...[
-                              const SizedBox(height: 10),
-                              _PaymentSummaryCard(
-                                bus: _selectedBus!,
-                                rideAccessEnabled: widget.rideAccessEnabled,
-                                trialRidesRemaining: widget.trialRidesRemaining,
-                                walletActionLabel: walletActionLabel,
-                                canUseWallet: widget.rideAccessEnabled
-                                    ? widget.walletState.balance >= _selectedBus!.price
-                                    : widget.trialRidesRemaining > 0,
-                                canUseTransportCard: widget.rideAccessEnabled &&
-                                    _transportCard != null &&
-                                    _transportCard!.balance >= _selectedBus!.price,
-                                transportCardLabel: _transportCard == null
-                                    ? 'Транспортная карта не добавлена'
-                                    : 'Транспортная карта • ${formatBalance(_transportCard!.balance)} ₸',
-                                onWalletPay: _saving ? null : () => _pay('wallet'),
-                                onTransportPay: _saving || _transportCard == null
-                                    ? null
-                                    : () => _pay('transport-card'),
-                              ),
-                            ],
-                            if (_error.isNotEmpty) ...[
-                              const SizedBox(height: 16),
-                              _InfoBox(
-                                message: _error,
-                                background: const Color(0xFFFFE4E4),
-                                color: const Color(0xFFB32828),
-                              ),
-                            ],
-                            if (_isBluetooth && _buses.isEmpty && _error.isEmpty)
-                              _InfoBox(
-                                message:
-                                    'Валидаторы для ${widget.cityName} пока не найдены. Добавьте автобусы в админке или выберите оплату по номеру.',
-                              ),
-                          ],
-                        ),
-                      ),
-              ),
             ],
           ),
         ),
       ),
     );
   }
+
+  List<Widget> _paymentColumnChildren(String walletActionLabel) {
+    return [
+      ..._buses.map(
+        (bus) => Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: _BusCard(
+            bus: bus,
+            selected: _selectedBus?.id == bus.id,
+            onTap: () {
+              setState(() {
+                _selectedBus = bus;
+              });
+            },
+          ),
+        ),
+      ),
+      if (!_isBluetooth &&
+          _queryController.text.trim().isNotEmpty &&
+          _buses.isEmpty &&
+          _tariffs.isNotEmpty)
+        _AddBusCard(
+          routeController: _routeController,
+          tariffs: _tariffs,
+          selectedTariffId: _selectedTariffId,
+          onSelectTariff: (value) {
+            setState(() {
+              _selectedTariffId = value;
+            });
+          },
+          onAddBus: _saving ? null : _addBus,
+        ),
+      if (_selectedBus != null) ...[
+        const SizedBox(height: 10),
+        _PaymentSummaryCard(
+          bus: _selectedBus!,
+          rideAccessEnabled: widget.rideAccessEnabled,
+          trialRidesRemaining: widget.trialRidesRemaining,
+          walletActionLabel: walletActionLabel,
+          canUseWallet: widget.rideAccessEnabled
+              ? widget.walletState.balance >= _selectedBus!.price
+              : widget.trialRidesRemaining > 0,
+          canUseTransportCard: widget.rideAccessEnabled &&
+              _transportCard != null &&
+              _transportCard!.balance >= _selectedBus!.price,
+          transportCardLabel: _transportCard == null
+              ? 'Транспортная карта не добавлена'
+              : 'Транспортная карта • ${formatBalance(_transportCard!.balance)} ₸',
+          onWalletPay: _saving ? null : () => _pay('wallet'),
+          onTransportPay:
+              _saving || _transportCard == null ? null : () => _pay('transport-card'),
+          demoFooter: _strings.demoPaymentNotice,
+        ),
+      ],
+      if (_error.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        _InfoBox(
+          message: _error,
+          background: const Color(0xFFFFE4E4),
+          color: const Color(0xFFB32828),
+        ),
+      ],
+      if (_isBluetooth && _buses.isEmpty && _error.isEmpty && !_loading)
+        _InfoBox(
+          message:
+              'Валидаторы для ${widget.cityName} пока не найдены. Добавьте автобусы в админке или выберите оплату по номеру.',
+        ),
+    ];
+  }
 }
 
-class _TicketDialog extends StatelessWidget {
-  const _TicketDialog({required this.ticket});
+class _BluetoothSearchIndicator extends StatefulWidget {
+  const _BluetoothSearchIndicator();
 
-  final TicketDto ticket;
+  @override
+  State<_BluetoothSearchIndicator> createState() => _BluetoothSearchIndicatorState();
+}
+
+class _BluetoothSearchIndicatorState extends State<_BluetoothSearchIndicator>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(3, (i) {
+                final phase = (_controller.value * 3 - i + 1) % 3;
+                final scale = 0.55 + 0.45 * (1 - (phase / 2).clamp(0.0, 1.0));
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 7),
+                  child: Transform.scale(
+                    scale: scale,
+                    child: Container(
+                      width: 11,
+                      height: 11,
+                      decoration: const BoxDecoration(
+                        color: AppColors.accentYellow,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            );
+          },
+        ),
+        const SizedBox(height: 22),
+        const Text(
+          'Идет поиск доступного транспорта',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w500,
+            color: AppColors.textPrimary,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TicketDialog extends StatefulWidget {
+  const _TicketDialog({required this.ticket, required this.strings});
+
+  final TicketDto ticket;
+  final AppStrings strings;
+
+  @override
+  State<_TicketDialog> createState() => _TicketDialogState();
+}
+
+class _TicketDialogState extends State<_TicketDialog> {
+  Timer? _countdownTicker;
+
+  TicketDto get ticket => widget.ticket;
+  AppStrings get strings => widget.strings;
+
+  @override
+  void initState() {
+    super.initState();
+    _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _countdownTicker?.cancel();
+    super.dispose();
+  }
+
+  String _countdownPrimary() {
+    final until = ticket.validUntil.toLocal();
+    final now = DateTime.now();
+    if (!until.isAfter(now)) {
+      return strings.validExpired;
+    }
+    final left = until.difference(now);
+    if (left.inMinutes >= 1) {
+      return strings.validInMinutes.replaceFirst('%s', '${left.inMinutes}');
+    }
+    final sec = left.inSeconds.clamp(0, 59);
+    return strings.validInSeconds.replaceFirst('%s', '$sec');
+  }
+
+  String _validUntilReadable() {
+    final v = ticket.validUntil.toLocal();
+    final d =
+        '${v.day.toString().padLeft(2, '0')}.${v.month.toString().padLeft(2, '0')}.${v.year}';
+    return '$d ${_formatTime(v)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final paidLocal = ticket.paidAt.toLocal();
+    final dateStr =
+        '${paidLocal.day.toString().padLeft(2, '0')}.${paidLocal.month.toString().padLeft(2, '0')}.${paidLocal.year}';
+    final routeStr = _formatTicketRoute(ticket.routeNumber);
+    final sumStr = '${formatBalance(ticket.amount)} ₸';
+    final countdown = _countdownPrimary();
+    final validLine = _validUntilReadable();
+
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
@@ -648,98 +975,136 @@ class _TicketDialog extends StatelessWidget {
           borderRadius: BorderRadius.circular(28),
           boxShadow: appCardShadow,
         ),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Align(
-                alignment: Alignment.topRight,
-                child: InkWell(
-                  onTap: () => Navigator.of(context).pop(),
-                  borderRadius: BorderRadius.circular(18),
-                  child: const Padding(
-                    padding: EdgeInsets.all(4),
-                    child: Icon(Icons.close_rounded, color: AppColors.textSecondary),
-                  ),
-                ),
-              ),
-              const Text(
-                'Номер транспорта',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 15, color: AppColors.textSecondary),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                ticket.busNumber,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 20),
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: QrImageView(
-                    data: ticket.qrValue,
-                    size: 180,
-                    backgroundColor: Colors.white,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Время оплаты',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 15, color: AppColors.textSecondary),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _formatTime(ticket.paidAt),
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 22),
-              const Text(
-                'Мой билет',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final qrSize = (constraints.maxWidth * 0.52).clamp(132.0, 272.0);
+            return SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _TicketStat(label: 'Город', value: ticket.cityName),
-                  const _TicketStat(label: 'Дата оплаты', value: 'Сегодня'),
-                  _TicketStat(label: 'Маршрут', value: ticket.routeNumber),
-                  _TicketStat(
-                    label: 'Сумма проезда',
-                    value: '${ticket.amount.toInt()} ₸',
+                  Align(
+                    alignment: Alignment.topRight,
+                    child: InkWell(
+                      onTap: () => Navigator.of(context).pop(),
+                      borderRadius: BorderRadius.circular(18),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(Icons.close_rounded, color: AppColors.textSecondary),
+                      ),
+                    ),
                   ),
-                  _TicketStat(label: 'Вид тарифа', value: ticket.tariffName),
-                  _TicketStat(
-                    label: 'Действует до',
-                    value: _formatTime(ticket.validUntil),
+                  Text(
+                    strings.ticketVehicleNumberCaption,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 14, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    ticket.busNumber,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Center(
+                    child: Semantics(
+                      label: strings.ticketQrSemantics,
+                      child: QrImageView(
+                        data: ticket.qrValue,
+                        size: qrSize,
+                        backgroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '${strings.validUntilLabel}: $validLine',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 6),
+                  Semantics(
+                    liveRegion: true,
+                    label: '${strings.validUntilLabel}, $countdown',
+                    child: Text(
+                      countdown,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: countdown == strings.validExpired
+                            ? const Color(0xFFB32828)
+                            : AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    strings.ticketPaymentTimeCaption,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 14, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _formatTime(ticket.paidAt),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    strings.ticketTitle,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  LayoutBuilder(
+                    builder: (context, innerConstraints) {
+                      final gap = 12.0;
+                      final cellW = (innerConstraints.maxWidth - gap) / 2;
+                      Widget cell(String label, String value) {
+                        return SizedBox(
+                          width: cellW,
+                          child: _TicketStat(label: label, value: value),
+                        );
+                      }
+
+                      return Column(
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              cell(strings.ticketRouteStat, routeStr),
+                              SizedBox(width: gap),
+                              cell(strings.ticketPaymentDateStat, dateStr),
+                            ],
+                          ),
+                          SizedBox(height: gap),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              cell(strings.ticketTariffStat, ticket.tariffName),
+                              SizedBox(width: gap),
+                              cell(strings.ticketSumStat, sumStr),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -825,7 +1190,7 @@ class _WalletBanner extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            '$phoneNumber  ${transportCard?.holderName ?? 'Стандарт'}',
+            '${formatPhoneForWalletBanner(phoneNumber)}  ${walletBannerTariffSubtitle(transportCard)}',
             style: const TextStyle(fontSize: 15, color: Color(0xFFD7DCEC)),
           ),
         ],
@@ -1042,6 +1407,7 @@ class _PaymentSummaryCard extends StatelessWidget {
     required this.transportCardLabel,
     required this.onWalletPay,
     required this.onTransportPay,
+    this.demoFooter,
   });
 
   final BusDto bus;
@@ -1053,6 +1419,7 @@ class _PaymentSummaryCard extends StatelessWidget {
   final String transportCardLabel;
   final VoidCallback? onWalletPay;
   final VoidCallback? onTransportPay;
+  final String? demoFooter;
 
   @override
   Widget build(BuildContext context) {
@@ -1126,6 +1493,18 @@ class _PaymentSummaryCard extends StatelessWidget {
           backgroundColor: const Color(0xFFF1F1F1),
           foregroundColor: AppColors.textPrimary,
         ),
+        if (demoFooter != null && demoFooter!.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text(
+            demoFooter!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 13,
+              height: 1.35,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1232,4 +1611,34 @@ String _formatTime(DateTime value) {
   final hours = local.hour.toString().padLeft(2, '0');
   final minutes = local.minute.toString().padLeft(2, '0');
   return '$hours:$minutes';
+}
+
+String formatPhoneForWalletBanner(String phoneNumber) {
+  final digits = phoneNumber.replaceAll(RegExp(r'\D'), '');
+  if (digits.length == 11 && digits.startsWith('7')) {
+    final r = digits.substring(1);
+    return '+7 (${r.substring(0, 3)}) ${r.substring(3, 6)}-${r.substring(6, 8)}-${r.substring(8)}';
+  }
+  if (digits.length == 10) {
+    return '+7 (${digits.substring(0, 3)}) ${digits.substring(3, 6)}-${digits.substring(6)}';
+  }
+  return phoneNumber.trim().isEmpty ? '+7 (700) 000-00-00' : phoneNumber;
+}
+
+String walletBannerTariffSubtitle(WalletCardData? transportCard) {
+  if (transportCard?.isTransport == true) {
+    return 'Транспортная';
+  }
+  return 'Стандарт';
+}
+
+String _formatTicketRoute(String routeNumber) {
+  final t = routeNumber.trim();
+  if (t.isEmpty) {
+    return '—';
+  }
+  if (t.startsWith('№')) {
+    return t;
+  }
+  return '№ $t';
 }
