@@ -13,6 +13,12 @@ import 'wallet_store.dart';
 /// Фон сканера — не чистый чёрный, чтобы экран не выглядел «заваленным».
 const Color _kScannerScaffoldBg = Color(0xFF2C3544);
 
+/// Референс: төменгі «Кошелек» панелі (қою көк-сұр).
+const Color _kQrWalletCardBg = Color(0xFF3E4B5E);
+
+/// Сканер бұрыштары (жарқыраған көк).
+const Color _kQrCornerBlue = Color(0xFF2F7CF6);
+
 /// Full-screen QR scanner (reference UI) then [TransportPaymentOverlay] after a read.
 class QrScanPaymentScreen extends StatefulWidget {
   const QrScanPaymentScreen({
@@ -183,9 +189,9 @@ class _QrScanPaymentScreenState extends State<QrScanPaymentScreen> {
             : LayoutBuilder(
                 builder: (context, constraints) {
                   final size = constraints.biggest;
-                  final side = (size.shortestSide * 0.72).clamp(200.0, 320.0);
+                  final side = (size.shortestSide * 0.70).clamp(208.0, 312.0);
                   final cutOut = Rect.fromCenter(
-                    center: size.center(Offset.zero),
+                    center: size.center(Offset(0, -size.height * 0.04)),
                     width: side,
                     height: side,
                   );
@@ -289,47 +295,28 @@ class _QrScanPaymentScreenState extends State<QrScanPaymentScreen> {
                         top: cutOut.top,
                         width: cutOut.width,
                         height: cutOut.height,
-                        child: const _PulsingCornerBrackets(),
+                        child: const _CornerBrackets(),
                       ),
                       Positioned(
                         left: 0,
                         right: 0,
-                        top: cutOut.bottom + 16,
+                        top: cutOut.bottom + 14,
                         child: Center(
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.94),
-                              borderRadius: BorderRadius.circular(22),
-                              border: Border.all(color: const Color(0x33000000)),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Color(0x33000000),
-                                  blurRadius: 12,
-                                  offset: Offset(0, 4),
-                                ),
-                              ],
+                              color: Colors.black.withValues(alpha: 0.48),
+                              borderRadius: BorderRadius.circular(28),
                             ),
-                            child: const Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  'Наведите камеру на QR-код',
-                                  style: TextStyle(
-                                    color: Color(0xFF1A1F2A),
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                SizedBox(height: 4),
-                                Text(
-                                  'Держите устройство ровно, пока код в рамке',
-                                  style: TextStyle(
-                                    color: Color(0xFF5C6478),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
+                            child: const Text(
+                              'Наведите камеру на QR-код',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                                height: 1.2,
+                              ),
                             ),
                           ),
                         ),
@@ -411,51 +398,13 @@ class _ScannerCircleIconButton extends StatelessWidget {
             height: 48,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.white.withValues(alpha: 0.22),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.55), width: 1.5),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x66000000),
-                  blurRadius: 12,
-                  offset: Offset(0, 4),
-                ),
-              ],
+              color: Colors.black.withValues(alpha: 0.35),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.28), width: 1),
             ),
-            child: Icon(icon, color: Colors.white, size: 26),
+            child: Icon(icon, color: Colors.white, size: 24),
           ),
         ),
       ),
-    );
-  }
-}
-
-class _PulsingCornerBrackets extends StatefulWidget {
-  const _PulsingCornerBrackets();
-
-  @override
-  State<_PulsingCornerBrackets> createState() => _PulsingCornerBracketsState();
-}
-
-class _PulsingCornerBracketsState extends State<_PulsingCornerBrackets>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1200),
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: Tween<double>(begin: 0.82, end: 1).animate(
-        CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-      ),
-      child: const _CornerBrackets(),
     );
   }
 }
@@ -468,12 +417,11 @@ class _ScannerDimPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final full = Path()..addRect(Offset.zero & size);
-    final hole = Path()..addRRect(RRect.fromRectAndRadius(cutOut, const Radius.circular(4)));
+    final hole = Path()..addRect(cutOut);
     final overlay = Path.combine(PathOperation.difference, full, hole);
-    // Сине-серая вуаль вместо плотного чёрного — видно превью камеры (особенно в web).
     canvas.drawPath(
       overlay,
-      Paint()..color = const Color(0x992C354B),
+      Paint()..color = Colors.black.withValues(alpha: 0.52),
     );
   }
 
@@ -488,9 +436,9 @@ class _CornerBrackets extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const color = Color(0xFF5B7CFF);
-    const t = 3.0;
-    const len = 28.0;
+    const color = _kQrCornerBlue;
+    const t = 4.0;
+    const len = 40.0;
     Widget corner({required Alignment a, required bool top, required bool left}) {
       return Align(
         alignment: a,
@@ -581,54 +529,62 @@ class _QrWalletBottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      padding: const EdgeInsets.fromLTRB(22, 18, 22, 20),
       decoration: BoxDecoration(
-        color: const Color(0xF2FFFFFF),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0x1A000000)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x26000000),
-            blurRadius: 16,
-            offset: Offset(0, 6),
-          ),
-        ],
+        color: _kQrWalletCardBg,
+        borderRadius: BorderRadius.circular(28),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Кошелек',
-                  style: TextStyle(
-                    color: Color(0xFF1A1F2A),
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                  ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Кошелек',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  phone,
-                  style: const TextStyle(color: Color(0xFF2A3142), fontSize: 15),
+              ),
+              Text(
+                '${formatBalance(balance)} ₸',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  tariff,
-                  style: const TextStyle(color: Color(0xFF6B7289), fontSize: 14),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          Text(
-            '${formatBalance(balance)} ₸',
-            style: const TextStyle(
-              color: Color(0xFF0066FF),
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                phone,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  tariff,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.58),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
         ],
       ),

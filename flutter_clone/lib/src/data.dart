@@ -171,7 +171,7 @@ const quickActions = [
   QuickActionData(
     id: 'plate',
     title: 'Номер',
-    icon: Icons.confirmation_number_outlined,
+    icon: Icons.directions_bus_filled_rounded,
   ),
 ];
 
@@ -179,36 +179,36 @@ const serviceItems = [
   ServiceItemData(
     id: 'payments',
     title: 'Платежи',
-    icon: Icons.payments_outlined,
-    color: Color(0xFFF9DFC5),
+    icon: Icons.request_quote_rounded,
+    color: Color(0xFF0066FF),
   ),
   ServiceItemData(
     id: 'tickets',
     title: 'Мои билеты',
-    icon: Icons.style_outlined,
-    color: Color(0xFFE5F7C8),
+    icon: Icons.confirmation_number_rounded,
+    color: Color(0xFFFFC322),
   ),
   ServiceItemData(
     id: 'transfers',
     title: 'Переводы',
     icon: Icons.swap_horiz_rounded,
-    color: Color(0xFFDDE5FF),
+    color: Color(0xFF5B637F),
   ),
   ServiceItemData(
     id: 'intercity',
     title: 'Межгород',
-    icon: Icons.location_city_outlined,
-    color: Color(0xFFECE8FF),
+    icon: Icons.apartment_rounded,
+    color: Color(0xFF7B62F6),
   ),
 ];
 
 const promoCards = [
   PromoCardData(
-    title: 'Виртуальный\nльготный тариф',
+    title: 'Виртуальный льготный тариф',
     image: 'assets/banners/banner_yellow.png',
   ),
   PromoCardData(
-    title: 'История\nкошелька',
+    title: 'История кошелька',
     image: 'assets/banners/banner_green.png',
   ),
   PromoCardData(
@@ -227,11 +227,11 @@ const promoCards = [
 
 const offerCards = [
   OfferCardData(
-    title: 'Оплачивайте\nмобильную связь',
+    title: 'Оплачивайте мобильную',
     image: 'assets/banners/banner_pink.png',
   ),
   OfferCardData(
-    title: 'Пополняйте игровые\nаккаунты',
+    title: 'Пополняйте игровые аккаунты',
     image: 'assets/banners/banner_violet.png',
   ),
 ];

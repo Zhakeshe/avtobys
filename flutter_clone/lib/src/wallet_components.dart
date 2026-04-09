@@ -15,74 +15,98 @@ class WalletOverviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(28),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(28),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0070FF), Color(0xFF0055E6)],
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF0070FF), Color(0xFF0058E8)],
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x280066FF),
+                blurRadius: 16,
+                offset: Offset(0, 8),
+              ),
+            ],
           ),
-          boxShadow: appCardShadow,
-        ),
-        padding: const EdgeInsets.fromLTRB(20, 18, 18, 18),
-        child: Stack(
-          children: [
-            Positioned(
-              right: 4,
-              top: 4,
-              child: Container(
-                height: 52,
-                width: 52,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.16),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.add_rounded,
-                  color: Colors.white,
-                  size: 28,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(painter: _WalletPatternPainter()),
                 ),
               ),
-            ),
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(painter: _WalletPatternPainter()),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 16, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Баланс',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xE6FFFFFF),
+                          ),
+                        ),
+                        const Spacer(),
+                        Material(
+                          color: Colors.white,
+                          shape: const CircleBorder(),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: onTap,
+                            customBorder: const CircleBorder(),
+                            child: SizedBox(
+                              width: 36,
+                              height: 36,
+                              child: Icon(
+                                Icons.add_rounded,
+                                color: AppColors.primaryBlue,
+                                size: 24,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${formatBalance(walletState.balance)} ₸',
+                      style: const TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        height: 1.05,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      walletState.activeCard?.isTransport == true
+                          ? 'Транспортная'
+                          : 'Стандарт',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xE6FFFFFF),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                const Text(
-                  'Баланс',
-                  style: TextStyle(fontSize: 14, color: Color(0xFFE6EBFF)),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${formatBalance(walletState.balance)} ₸',
-                  style: const TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  walletState.activeCard?.isTransport == true
-                      ? 'Транспортная'
-                      : 'Стандарт',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    color: Color(0xFFD7DEFF),
-                  ),
-                ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -101,56 +125,61 @@ class WalletCardsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: walletState.cards.isEmpty
-                ? const Color(0xFFD0D8E6)
-                : const Color(0xFFF1F4F9),
-            width: walletState.cards.isEmpty ? 2 : 1.5,
-          ),
-          boxShadow: walletState.cards.isEmpty
-              ? const [
-                  BoxShadow(
-                    color: Color(0x080D1B2A),
-                    blurRadius: 14,
-                    offset: Offset(0, 5),
-                  ),
-                ]
-              : null,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              walletState.cards.isEmpty
-                  ? Icons.add_circle_outline_rounded
-                  : Icons.add_rounded,
-              color: walletState.cards.isEmpty
-                  ? const Color(0xFF9EA8BC)
-                  : const Color(0xFFC0C7D8),
-              size: 38,
+    final empty = walletState.cards.isEmpty;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: empty ? const Color(0xFFD5DAE6) : const Color(0xFFE8ECF4),
+              width: empty ? 1.5 : 1,
             ),
-            const SizedBox(height: 12),
-            Text(
-              walletState.cards.isEmpty
-                  ? 'Добавить\nкарту'
-                  : '${walletState.cards.length}\nкарты',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 14,
-                height: 1.2,
-                fontWeight: FontWeight.w400,
-                color: Color(0xFF9EA7BE),
+            boxShadow: empty
+                ? const [
+                    BoxShadow(
+                      color: Color(0x060D1B2A),
+                      blurRadius: 10,
+                      offset: Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.add_rounded,
+                    color: empty
+                        ? const Color(0xFF9AA4B8)
+                        : const Color(0xFFB8C0D0),
+                    size: 36,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    empty
+                        ? 'Добавить карту'
+                        : '${walletState.cards.length} карт${walletState.cards.length == 1 ? 'а' : 'ы'}',
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      height: 1.2,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF8E93A3),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -160,7 +189,7 @@ class WalletCardsTile extends StatelessWidget {
 class _WalletPatternPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.white.withValues(alpha: 0.08);
+    final paint = Paint()..color = Colors.white.withValues(alpha: 0.07);
 
     for (var row = 0; row < 6; row++) {
       for (var column = 0; column < 10; column++) {

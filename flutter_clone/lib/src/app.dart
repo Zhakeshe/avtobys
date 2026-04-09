@@ -750,7 +750,7 @@ class HomeScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const _TopOfferCard(
-              title: 'Оформить\nльготный тариф',
+              title: 'Оформить льготный тариф',
               icon: Icons.discount_outlined,
             ),
             const SizedBox(height: 18),
@@ -774,11 +774,11 @@ class HomeScreen extends StatelessWidget {
               width: double.infinity,
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(22),
               ),
-              padding: const EdgeInsets.symmetric(vertical: 14),
+              padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
               child: SizedBox(
-                height: 58,
+                height: 108,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   clipBehavior: Clip.none,
@@ -796,24 +796,21 @@ class HomeScreen extends StatelessWidget {
               width: double.infinity,
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(22),
               ),
-              padding: const EdgeInsets.fromLTRB(0, 20, 0, 18),
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 4),
-                    child: Text(
-                      'Предложения',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                      ),
+                  const Text(
+                    'Предложения',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
                     ),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 16),
                   SizedBox(
                     height: offerCardHeight,
                     child: ListView.separated(
@@ -865,12 +862,12 @@ class _WalletSection extends StatelessWidget {
     return Column(
       children: [
         SizedBox(
-          height: 172,
+          height: 168,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
-                flex: 7,
+                flex: 62,
                 child: WalletOverviewCard(
                   walletState: walletState,
                   onTap: onOpenTopUp,
@@ -878,7 +875,7 @@ class _WalletSection extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(
-                flex: 3,
+                flex: 38,
                 child: WalletCardsTile(
                   walletState: walletState,
                   onTap: onOpenCards,
@@ -887,7 +884,7 @@ class _WalletSection extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         Row(
           children: quickActions
               .map(
@@ -988,15 +985,15 @@ class BottomTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 100,
+      height: 96,
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade100)),
+        border: Border(top: BorderSide(color: Colors.grey.shade200.withValues(alpha: 0.65))),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 20,
-            offset: const Offset(0, -4),
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 16,
+            offset: const Offset(0, -2),
           ),
         ],
       ),
@@ -1018,7 +1015,7 @@ class BottomTabBar extends StatelessWidget {
                 ),
                 Expanded(
                   child: _BottomTabItem(
-                    icon: Icons.alt_route_rounded,
+                    icon: Icons.route_rounded,
                     label: 'Маршруты',
                     isSelected: selectedTab == RootTab.routes,
                     onTap: () => onTabSelected(RootTab.routes),
@@ -1044,26 +1041,26 @@ class BottomTabBar extends StatelessWidget {
               ],
             ),
             Positioned(
-              top: -24,
+              top: -22,
               child: GestureDetector(
                 onTap: onCenterTap,
                 child: Container(
-                  height: 72,
-                  width: 72,
+                  height: 68,
+                  width: 68,
                   decoration: BoxDecoration(
                     color: AppColors.primaryBlue,
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.primaryBlue.withValues(alpha: 0.3),
-                        blurRadius: 15,
-                        offset: const Offset(0, 6),
+                        color: AppColors.primaryBlue.withValues(alpha: 0.35),
+                        blurRadius: 14,
+                        offset: const Offset(0, 5),
                       ),
                     ],
                   ),
                   child: const Icon(
-                    Icons.qr_code_scanner_rounded,
-                    size: 32,
+                    Icons.qr_code_2_rounded,
+                    size: 30,
                     color: Colors.white,
                   ),
                 ),
@@ -1127,35 +1124,35 @@ class _ActionTile extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 14),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           boxShadow: const [
             BoxShadow(
-              color: Color(0x0C0D1B2A),
-              blurRadius: 16,
-              offset: Offset(0, 6),
+              color: Color(0x0A0D1B2A),
+              blurRadius: 14,
+              offset: Offset(0, 5),
             ),
           ],
         ),
         child: Column(
           children: [
             Container(
-              height: 48,
-              width: 48,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0F5FF),
-                borderRadius: BorderRadius.circular(14),
+              height: 54,
+              width: 54,
+              decoration: const BoxDecoration(
+                color: Color(0xFFE8F1FF),
+                shape: BoxShape.circle,
               ),
-              child: Icon(data.icon, color: AppColors.primaryBlue, size: 26),
+              child: Icon(data.icon, color: AppColors.primaryBlue, size: 28),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Text(
               data.title,
               style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w400,
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
                 color: AppColors.textPrimary,
               ),
             ),
@@ -1180,38 +1177,38 @@ class _ServiceTile extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           boxShadow: const [
             BoxShadow(
-              color: Color(0x0A0D1B2A),
-              blurRadius: 14,
-              offset: Offset(0, 5),
+              color: Color(0x080D1B2A),
+              blurRadius: 12,
+              offset: Offset(0, 4),
             ),
           ],
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         child: Row(
           children: [
             Container(
-              height: 48,
-              width: 48,
+              height: 50,
+              width: 50,
               decoration: BoxDecoration(
-                color: data.color.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(14),
+                color: data.color.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(
                 data.icon,
-                color: data.color.withValues(alpha: 0.8),
-                size: 24,
+                color: data.color,
+                size: 26,
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 data.title,
                 style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
                   color: AppColors.textPrimary,
                 ),
               ),
@@ -1234,19 +1231,19 @@ class _TopOfferCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: const Color(0xFFF3F5FA),
-        borderRadius: BorderRadius.circular(24),
+        color: const Color(0xFFF0F1F5),
+        borderRadius: BorderRadius.circular(22),
       ),
-      padding: const EdgeInsets.fromLTRB(20, 20, 16, 20),
+      padding: const EdgeInsets.fromLTRB(18, 18, 14, 18),
       child: Row(
         children: [
           Expanded(
             child: Text(
               title,
               style: const TextStyle(
-                fontSize: 20,
-                height: 1.2,
-                fontWeight: FontWeight.w500,
+                fontSize: 18,
+                height: 1.25,
+                fontWeight: FontWeight.w700,
                 color: AppColors.textPrimary,
               ),
             ),
@@ -1353,7 +1350,7 @@ class _PromoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(20),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -1369,24 +1366,24 @@ class _PromoCard extends StatelessWidget {
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
                 colors: [
-                  Color(0x5F000000),
-                  Color(0x28000000),
+                  Color(0x45000000),
+                  Color(0x18000000),
                   Color(0x00000000),
                 ],
-                stops: [0, 0.35, 0.75],
+                stops: [0, 0.4, 0.8],
               ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 8, 94, 8),
+            padding: const EdgeInsets.fromLTRB(16, 10, 88, 10),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
                 data.title,
                 maxLines: 2,
                 style: const TextStyle(
-                  fontSize: 17,
-                  height: 1.1,
+                  fontSize: 16,
+                  height: 1.15,
                   fontWeight: FontWeight.w700,
                   color: Colors.white,
                 ),
@@ -1407,7 +1404,7 @@ class _OfferCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(22),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -1420,27 +1417,27 @@ class _OfferCard extends StatelessWidget {
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
                 colors: [
-                  Color(0x73000000),
-                  Color(0x22000000),
+                  Color(0x55000000),
+                  Color(0x18000000),
                   Color(0x00000000),
                 ],
-                stops: [0, 0.4, 0.85],
+                stops: [0, 0.45, 1],
               ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 70, 16),
+            padding: const EdgeInsets.fromLTRB(14, 14, 56, 14),
             child: Align(
               alignment: Alignment.topLeft,
               child: Text(
                 data.title,
                 maxLines: 2,
                 style: const TextStyle(
-                  fontSize: 16,
-                  height: 1.15,
+                  fontSize: 15,
+                  height: 1.2,
                   fontWeight: FontWeight.w700,
                   color: Colors.white,
                 ),
@@ -1531,20 +1528,23 @@ class _BottomTabItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isSelected ? AppColors.primaryBlue : AppColors.textSecondary;
+    final color = isSelected ? AppColors.primaryBlue : const Color(0xFF9CA3B0);
     return InkWell(
       onTap: onTap,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: 4),
+          Icon(icon, color: color, size: isSelected ? 26 : 25),
+          const SizedBox(height: 2),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 11,
               fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
               color: color,
+              height: 1.1,
             ),
           ),
         ],

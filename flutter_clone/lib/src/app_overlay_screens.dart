@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'activity_history.dart';
 import 'app_prefs.dart';
 import 'data.dart';
+import 'login_phone_storage.dart';
 import 'l10n/app_strings.dart';
 import 'theme.dart';
 import 'transport_api.dart';
@@ -410,6 +411,22 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
           ? initial.substring(initial.length - 10)
           : initial,
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _hydrateSavedPhone());
+  }
+
+  Future<void> _hydrateSavedPhone() async {
+    if (_phoneController.text.replaceAll(RegExp(r'\D'), '').length >= 10) {
+      return;
+    }
+    final saved = await LoginPhoneStorage.load10Digits();
+    if (!mounted || saved == null) {
+      return;
+    }
+    _phoneController.value = TextEditingValue(
+      text: saved,
+      selection: TextSelection.collapsed(offset: saved.length),
+    );
+    setState(() {});
   }
 
   @override
@@ -460,6 +477,9 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
         _error = deliveryError;
         _codeController.clear();
       });
+      if (canEnterCode) {
+        unawaited(LoginPhoneStorage.save10Digits(_digits));
+      }
       if (response.telegramBind != null) {
         _startBindPolling();
       } else {
@@ -510,6 +530,7 @@ class _LoginEntryScreenState extends State<LoginEntryScreen> {
     });
     try {
       await widget.onVerifyCode(_phoneNumber, _codeController.text.trim());
+      await LoginPhoneStorage.save10Digits(_digits);
     } catch (error) {
       if (!mounted) {
         return;
@@ -1454,7 +1475,7 @@ class _CitySelector extends StatelessWidget {
   }
 }
 
-class _PhoneEntryCard extends StatelessWidget {
+class _PhoneEntryCard extends StatefulWidget {
   const _PhoneEntryCard({
     required this.controller,
     required this.onChanged,
@@ -1464,7 +1485,31 @@ class _PhoneEntryCard extends StatelessWidget {
   final ValueChanged<String> onChanged;
 
   @override
+  State<_PhoneEntryCard> createState() => _PhoneEntryCardState();
+}
+
+class _PhoneEntryCardState extends State<_PhoneEntryCard> {
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onControllerTick);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerTick);
+    super.dispose();
+  }
+
+  void _onControllerTick() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
       decoration: BoxDecoration(
@@ -1508,19 +1553,35 @@ class _PhoneEntryCard extends StatelessWidget {
                 Expanded(
                   child: TextField(
                     controller: controller,
-                    keyboardType: TextInputType.phone,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      signed: false,
+                      decimal: false,
+                    ),
+                    textInputAction: TextInputAction.done,
+                    minLines: 1,
+                    maxLines: 1,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    smartDashesType: SmartDashesType.disabled,
+                    smartQuotesType: SmartQuotesType.disabled,
+                    cursorColor: AppColors.primaryBlue,
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly,
                       LengthLimitingTextInputFormatter(10),
                     ],
-                    onChanged: onChanged,
+                    onChanged: widget.onChanged,
                     decoration: const InputDecoration(
                       hintText: 'Введите номер телефона',
                       border: InputBorder.none,
+                      filled: true,
+                      fillColor: Colors.transparent,
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 20),
                       hintStyle: TextStyle(color: AppColors.textSecondary),
                     ),
                     style: const TextStyle(
                       fontSize: 18,
+                      height: 1.2,
                       color: AppColors.textPrimary,
                     ),
                   ),
@@ -1530,7 +1591,7 @@ class _PhoneEntryCard extends StatelessWidget {
                       ? null
                       : () {
                           controller.clear();
-                          onChanged('');
+                          widget.onChanged('');
                         },
                   icon: const Icon(
                     Icons.cancel_rounded,

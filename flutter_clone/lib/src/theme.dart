@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class AppColors {
-  static const background = Color(0xFFF5F5F7);
+  static const background = Color(0xFFF5F5F5);
   static const surface = Colors.white;
   static const surfaceMuted = Color(0xFFF1F3F8);
   static const border = Color(0xFFE6E9F1);
