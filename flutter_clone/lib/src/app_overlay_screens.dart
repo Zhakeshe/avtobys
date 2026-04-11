@@ -1489,6 +1489,8 @@ class _PhoneEntryCard extends StatefulWidget {
 }
 
 class _PhoneEntryCardState extends State<_PhoneEntryCard> {
+  final FocusNode _phoneFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
@@ -1498,6 +1500,7 @@ class _PhoneEntryCardState extends State<_PhoneEntryCard> {
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerTick);
+    _phoneFocusNode.dispose();
     super.dispose();
   }
 
@@ -1505,6 +1508,20 @@ class _PhoneEntryCardState extends State<_PhoneEntryCard> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  void _onPhoneChanged(String raw) {
+    var digits = raw.replaceAll(RegExp(r'\D'), '');
+    if (digits.length > 10) {
+      digits = digits.substring(0, 10);
+    }
+    if (digits != raw) {
+      widget.controller.value = TextEditingValue(
+        text: digits,
+        selection: TextSelection.collapsed(offset: digits.length),
+      );
+    }
+    widget.onChanged(digits);
   }
 
   @override
@@ -1553,23 +1570,19 @@ class _PhoneEntryCardState extends State<_PhoneEntryCard> {
                 Expanded(
                   child: TextField(
                     controller: controller,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      signed: false,
-                      decimal: false,
-                    ),
+                    focusNode: _phoneFocusNode,
+                    keyboardType: TextInputType.phone,
                     textInputAction: TextInputAction.done,
                     minLines: 1,
                     maxLines: 1,
                     autocorrect: false,
                     enableSuggestions: false,
-                    smartDashesType: SmartDashesType.disabled,
-                    smartQuotesType: SmartQuotesType.disabled,
                     cursorColor: AppColors.primaryBlue,
                     inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
                       LengthLimitingTextInputFormatter(10),
                     ],
-                    onChanged: widget.onChanged,
+                    onTap: () => _phoneFocusNode.requestFocus(),
+                    onChanged: _onPhoneChanged,
                     decoration: const InputDecoration(
                       hintText: 'Введите номер телефона',
                       border: InputBorder.none,

@@ -98,6 +98,26 @@ class _QrScanPaymentScreenState extends State<QrScanPaymentScreen> {
         detectionSpeed: DetectionSpeed.noDuplicates,
         facing: CameraFacing.back,
       );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_ensureCameraStarted());
+      });
+    }
+  }
+
+  /// Web / iOS PWA: виджет салынғаннан кейін камераны显式 қосу керек.
+  Future<void> _ensureCameraStarted() async {
+    final c = _scannerController;
+    if (!mounted || c == null || _manualMode) {
+      return;
+    }
+    try {
+      await c.start();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _manualMode = true;
+        });
+      }
     }
   }
 
@@ -127,7 +147,7 @@ class _QrScanPaymentScreenState extends State<QrScanPaymentScreen> {
       _scannedToken = null;
     });
     if (_scannerController != null && !_manualMode) {
-      unawaited(_scannerController!.start());
+      unawaited(_ensureCameraStarted());
     }
   }
 
@@ -178,9 +198,6 @@ class _QrScanPaymentScreenState extends State<QrScanPaymentScreen> {
         backgroundColor: _kScannerScaffoldBg,
         body: _manualMode
             ? _ManualQrFallback(
-                phoneNumber: phone,
-                tariffLabel: tariff,
-                balance: widget.walletState.balance,
                 controller: _manualController,
                 onSubmit: _submitManual,
                 onClose: widget.onBack,
@@ -200,86 +217,88 @@ class _QrScanPaymentScreenState extends State<QrScanPaymentScreen> {
                     children: [
                       Positioned.fill(
                         child: MobileScanner(
-                        controller: _scannerController,
-                        fit: BoxFit.cover,
-                        placeholderBuilder: (context) => const Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 3,
-                                  color: Colors.white,
+                          controller: _scannerController,
+                          fit: BoxFit.cover,
+                          placeholderBuilder: (context) => const Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 36,
+                                  height: 36,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    color: Colors.white,
+                                  ),
                                 ),
-                              ),
-                              SizedBox(height: 18),
-                              Text(
-                                'Подключение камеры…',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              SizedBox(height: 8),
-                              Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 32),
-                                child: Text(
-                                  'Разрешите доступ к камере в запросе браузера',
-                                  textAlign: TextAlign.center,
+                                SizedBox(height: 18),
+                                Text(
+                                  'Подключение камеры…',
                                   style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 13,
-                                    height: 1.35,
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                SizedBox(height: 8),
+                                Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 28),
+                                  child: Text(
+                                    'Разрешите доступ к камере. В PWA откройте настройки сайта, если запрос не появился.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 13,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          errorBuilder: (context, error) {
+                            return ColoredBox(
+                              color: _kScannerScaffoldBg,
+                              child: Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(24),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        error.errorDetails?.message ??
+                                            error.toString(),
+                                        textAlign: TextAlign.center,
+                                        style:
+                                            const TextStyle(color: Colors.white70),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      TextButton(
+                                        onPressed: () {
+                                          setState(() {
+                                            _manualMode = true;
+                                          });
+                                        },
+                                        child: const Text(
+                                          'Ввести QR token вручную',
+                                          style: TextStyle(color: Colors.white),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                        errorBuilder: (context, error) {
-                          return ColoredBox(
-                            color: _kScannerScaffoldBg,
-                            child: Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      error.errorDetails?.message ?? error.toString(),
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(color: Colors.white70),
-                                    ),
-                                    const SizedBox(height: 16),
-                                    TextButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          _manualMode = true;
-                                        });
-                                      },
-                                      child: const Text(
-                                        'Ввести QR token вручную',
-                                        style: TextStyle(color: Colors.white),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                        onDetect: (capture) {
-                          for (final b in capture.barcodes) {
-                            final v = b.rawValue ?? b.displayValue;
-                            if (v != null && v.trim().isNotEmpty) {
-                              unawaited(_applyScannedCode(v));
-                              return;
+                            );
+                          },
+                          onDetect: (capture) {
+                            for (final b in capture.barcodes) {
+                              final v = b.rawValue ?? b.displayValue;
+                              if (v != null && v.trim().isNotEmpty) {
+                                unawaited(_applyScannedCode(v));
+                                return;
+                              }
                             }
-                          }
-                        },
+                          },
                         ),
                       ),
                       Positioned.fill(
@@ -303,7 +322,10 @@ class _QrScanPaymentScreenState extends State<QrScanPaymentScreen> {
                         top: cutOut.bottom + 14,
                         child: Center(
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 11,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.black.withValues(alpha: 0.48),
                               borderRadius: BorderRadius.circular(28),
@@ -342,7 +364,10 @@ class _QrScanPaymentScreenState extends State<QrScanPaymentScreen> {
                         child: SafeArea(
                           bottom: false,
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
                             child: Row(
                               children: [
                                 _ScannerCircleIconButton(
@@ -594,18 +619,12 @@ class _QrWalletBottomBar extends StatelessWidget {
 
 class _ManualQrFallback extends StatelessWidget {
   const _ManualQrFallback({
-    required this.phoneNumber,
-    required this.tariffLabel,
-    required this.balance,
     required this.controller,
     required this.onSubmit,
     required this.onClose,
     required this.insecureWeb,
   });
 
-  final String phoneNumber;
-  final String tariffLabel;
-  final double balance;
   final TextEditingController controller;
   final VoidCallback onSubmit;
   final VoidCallback onClose;
@@ -635,32 +654,26 @@ class _ManualQrFallback extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (insecureWeb)
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Text(
-                      'Камера в браузере доступна только по HTTPS или на localhost. '
-                      'Введите QR token вручную или откройте сайт по защищённому адресу.',
-                      style: TextStyle(color: Colors.white, height: 1.35),
-                    ),
-                  )
-                else
-                  const Text(
-                    'Камера недоступна на этой платформе. Введите QR token автобуса.',
-                    style: TextStyle(color: Colors.white70, height: 1.35),
-                  ),
-                const SizedBox(height: 20),
-                _QrWalletBottomBar(
-                  phone: phoneNumber,
-                  tariff: tariffLabel,
-                  balance: balance,
-                ),
-                const SizedBox(height: 24),
-                TextField(
+          if (insecureWeb)
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Text(
+                'Камера в браузере доступна только по HTTPS или на localhost. '
+                'Введите QR token вручную или откройте сайт по защищённому адресу.',
+                style: TextStyle(color: Colors.white, height: 1.35),
+              ),
+            )
+          else
+            const Text(
+              'Камера недоступна или не запустилась. Введите QR token автобуса.',
+              style: TextStyle(color: Colors.white70, height: 1.35),
+            ),
+          const SizedBox(height: 20),
+          TextField(
                   controller: controller,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(

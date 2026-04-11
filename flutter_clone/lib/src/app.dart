@@ -450,9 +450,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
     }
 
     if (_selectedTab == RootTab.qr) {
-      final qrPhone = _phoneNumber.isNotEmpty
-          ? _phoneNumber
-          : '+7 700-255-56-19';
+      final qrPhone = _phoneNumber;
       return QrScanPaymentScreen(
         phoneNumber: qrPhone,
         cityName: _currentCity,
@@ -558,9 +556,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
 
   Widget _buildScreen() {
     final city = _currentCity;
-    final phoneNumber = _phoneNumber.isNotEmpty
-        ? _phoneNumber
-        : '+7 700-255-56-19';
+    final phoneNumber = _phoneNumber;
     final activeCard = _walletState.activeCard;
     final cardSubtitle = activeCard == null
         ? 'Добавить карту'
@@ -606,9 +602,7 @@ class _AvtobysCloneAppState extends State<AvtobysCloneApp> {
 
   Widget _buildOverlayScreen() {
     final city = _currentCity;
-    final phoneNumber = _phoneNumber.isNotEmpty
-        ? _phoneNumber
-        : '+7 700-255-56-19';
+    final phoneNumber = _phoneNumber;
 
     switch (_overlay!) {
       case AppOverlay.login:
